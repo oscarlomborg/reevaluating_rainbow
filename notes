@@ -15,7 +15,9 @@ Get-ChildItem -Force .\logs | Remove-Item -Recurse -Force
 
 ## HPC (Linux)
 
-cd ~/Documents/reevaluating-rainbow
+cd ~/Documents/reevaluating_rainbow
+
+du -sh ~/Documents
 
 # General command line prompts
 
