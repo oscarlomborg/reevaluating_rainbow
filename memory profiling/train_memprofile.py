@@ -27,7 +27,7 @@ try:
 except ImportError:
     register_envs = None
 
-from SETUP import (
+from SETUP_v5 import (
     Estimator,
     ModelParametersCopier,
     StateProcessor,

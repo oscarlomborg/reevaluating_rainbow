@@ -20,6 +20,11 @@ import psutil
 import torch
 
 try:
+    import minatar
+except ImportError:
+    minatar = None
+
+try:
     from minatar.gym import register_envs
 except ImportError:
     register_envs = None
@@ -61,6 +66,13 @@ def load_config(path):
         raise ImportError(f"Could not load config: {path}")
     cfg = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cfg)
+
+    # Backward-compatible defaults.
+    if not hasattr(cfg, "HIDDEN_LAYERS"):
+        cfg.HIDDEN_LAYERS = 1
+    if not hasattr(cfg, "MINATAR_BACKEND"):
+        cfg.MINATAR_BACKEND = "gym"
+
     return cfg
 
 
@@ -74,6 +86,10 @@ def validate_config(cfg):
         raise ValueError("ENV_TYPE must be 'minatar' or 'atari'.")
     if cfg.NETWORK_TYPE not in ("dqn", "dueling", "distributional", "distributional_dueling"):
         raise ValueError(f"Unknown NETWORK_TYPE: {cfg.NETWORK_TYPE}")
+    if not isinstance(cfg.HIDDEN_LAYERS, int) or cfg.HIDDEN_LAYERS < 0:
+        raise ValueError("HIDDEN_LAYERS must be a nonnegative integer.")
+    if cfg.MINATAR_BACKEND not in ("gym", "native"):
+        raise ValueError("MINATAR_BACKEND must be 'gym' or 'native'.")
     if cfg.N_STEP < 1:
         raise ValueError("N_STEP must be at least 1.")
     if cfg.REPLAY_PERIOD < 1:
@@ -108,9 +124,12 @@ def validate_config(cfg):
 def register_environment_type(cfg):
     """Register MinAtar only when the selected config needs it."""
     if cfg.ENV_TYPE == "minatar":
-        if register_envs is None:
+        if minatar is None:
             raise ImportError("ENV_TYPE='minatar' requires the minatar package.")
-        register_envs()
+        if cfg.MINATAR_BACKEND == "gym":
+            if register_envs is None:
+                raise ImportError("MINATAR_BACKEND='gym' requires minatar.gym.")
+            register_envs()
 
 
 def config_name(cfg):
@@ -126,10 +145,50 @@ Transition = namedtuple("Transition", ["state", "action", "reward", "next_state"
 EpisodeStats = namedtuple("EpisodeStats", ["episode_lengths", "episode_rewards"])
 
 
-def make_env(env_id, env_type, seed, noop_max=0):
+def _minatar_game_name(env_id):
+    """Convert e.g. MinAtar/SpaceInvaders-v1 -> space_invaders."""
+    name = env_id.split("/")[-1].rsplit("-v", 1)[0]
+    return {
+        "Asterix": "asterix",
+        "Breakout": "breakout",
+        "Freeway": "freeway",
+        "Seaquest": "seaquest",
+        "SpaceInvaders": "space_invaders",
+    }.get(name, name)
+
+
+class NativeMinAtarEnv(gym.Env):
+    """Gymnasium API around minatar.Environment (full 6-action set)."""
+
+    metadata = {}
+
+    def __init__(self, env_id):
+        super().__init__()
+        self.game = minatar.Environment(env_name=_minatar_game_name(env_id))
+        self.action_space = gym.spaces.Discrete(self.game.num_actions())
+        self.observation_space = gym.spaces.Box(
+            low=0, high=1, shape=tuple(self.game.state_shape()), dtype=np.bool_
+        )
+
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
+        if seed is not None:
+            self.game.seed(seed)
+        self.game.reset()
+        return self.game.state(), {}
+
+    def step(self, action):
+        reward, terminated = self.game.act(int(action))
+        return self.game.state(), float(reward), bool(terminated), False, {}
+
+
+def make_env(env_id, env_type, seed, noop_max=0, minatar_backend="gym"):
     """Create a MinAtar or preprocessed Atari environment."""
     if env_type == "minatar":
-        env = gym.make(env_id)
+        if minatar_backend == "native":
+            env = NativeMinAtarEnv(env_id)
+        else:
+            env = gym.make(env_id)
     else:
         # Atari preprocessing also handles Atari no-op starts.
         env = gym.make(env_id, frameskip=1)
@@ -517,6 +576,8 @@ def train_model(
                 "v_max": cfg.V_MAX,
                 "adam_lr": cfg.ADAM_LR,
                 "adam_eps": cfg.ADAM_EPS,
+                "hidden_layers": cfg.HIDDEN_LAYERS,
+                "minatar_backend": cfg.MINATAR_BACKEND,
             },
         },
         checkpoint_path,
@@ -569,8 +630,14 @@ def run_job(job):
 
     try:
         # AtariPreprocessing receives NOOP_MAX directly.
-        env = make_env(env_id, cfg.ENV_TYPE, seed, noop_max=cfg.NOOP_MAX)
-        eval_env = make_env(env_id, cfg.ENV_TYPE, seed + 1, noop_max=cfg.NOOP_MAX)
+        env = make_env(
+            env_id, cfg.ENV_TYPE, seed, noop_max=cfg.NOOP_MAX,
+            minatar_backend=cfg.MINATAR_BACKEND,
+        )
+        eval_env = make_env(
+            env_id, cfg.ENV_TYPE, seed + 1, noop_max=cfg.NOOP_MAX,
+            minatar_backend=cfg.MINATAR_BACKEND,
+        )
 
         state_processor = StateProcessor(cfg.ENV_TYPE)
 
@@ -590,6 +657,7 @@ def run_job(job):
             num_atoms=cfg.NUM_ATOMS,
             v_min=cfg.V_MIN,
             v_max=cfg.V_MAX,
+            hidden_layers=cfg.HIDDEN_LAYERS,
             adam_lr=cfg.ADAM_LR,
             adam_eps=cfg.ADAM_EPS,
             device=device,

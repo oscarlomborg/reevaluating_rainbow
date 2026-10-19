@@ -4,7 +4,7 @@ ENV_TYPE = "minatar"
 
 NAME = "rainbow"
 
-NOOP_MAX = 5
+NOOP_MAX = 0
 
 DOUBLE_DQN = True
 N_STEP = 3
@@ -17,6 +17,14 @@ NOISY = True
 NUM_ATOMS = 51
 V_MIN = -100.0
 V_MAX = 100.0
+
+# MinAtar implementation:
+# "gym"    -> Gymnasium MinAtar environments
+# "native" -> minatar.Environment
+MINATAR_BACKEND = "native"
+
+# Number of fully connected hidden layers after the convolution.
+HIDDEN_LAYERS = 0
 
 ENVIRONMENTS = [
     "MinAtar/Asterix-v1",

@@ -67,7 +67,7 @@ class StateProcessor:
             )
 
         if self.env_type == "minatar":
-            # Gym MinAtar: HWC -> CHW
+            # MinAtar: HWC -> CHW
             state = np.transpose(state, (2, 0, 1))
 
         elif self.env_type == "atari":
@@ -201,45 +201,81 @@ class ConvFeatureExtractor(nn.Module):
 class DQN(ConvFeatureExtractor):
     """Standard DQN: convolutional features followed by one Q-value head."""
 
-    def __init__(self, input_shape, num_actions, env_type, noisy=False):
+    def __init__(self, input_shape, num_actions, env_type, noisy=False, hidden_layers=1):
         super().__init__(input_shape, env_type)
 
         hidden = 128 if env_type == "minatar" else 512
-
         Linear = get_linear(noisy)
+        self.hidden_layers = hidden_layers
 
-        self.fc1 = Linear(self.feature_dim, hidden)
+        if hidden_layers > 0:
+            self.fc1 = Linear(self.feature_dim, hidden)
+            self.extra_fc = nn.ModuleList(
+                Linear(hidden, hidden) for _ in range(hidden_layers - 1)
+            )
+            output_in = hidden
+        else:
+            self.fc1 = nn.Identity()
+            self.extra_fc = nn.ModuleList()
+            output_in = self.feature_dim
 
-        self.fc2 = Linear(hidden, num_actions)
+        self.fc2 = Linear(output_in, num_actions)
 
     def forward(self, x):
         x = self.extract_features(x)
 
-        x = F.relu(self.fc1(x))
+        if self.hidden_layers > 0:
+            x = F.relu(self.fc1(x))
+            for layer in self.extra_fc:
+                x = F.relu(layer(x))
 
         return self.fc2(x)
 
 class DuelDQN(ConvFeatureExtractor):
     """Dueling DQN with separate state-value and advantage streams."""
 
-    def __init__(self, input_shape, num_actions, env_type, noisy=False):
+    def __init__(self, input_shape, num_actions, env_type, noisy=False, hidden_layers=1):
         super().__init__(input_shape, env_type)
 
         hidden = 128 if env_type == "minatar" else 512
-
         Linear = get_linear(noisy)
+        self.hidden_layers = hidden_layers
 
-        self.value_fc = Linear(self.feature_dim, hidden)
-        self.value_out = Linear(hidden, 1)
+        if hidden_layers > 0:
+            self.value_fc = Linear(self.feature_dim, hidden)
+            self.adv_fc = Linear(self.feature_dim, hidden)
+            self.value_hidden = nn.ModuleList(
+                Linear(hidden, hidden) for _ in range(hidden_layers - 1)
+            )
+            self.adv_hidden = nn.ModuleList(
+                Linear(hidden, hidden) for _ in range(hidden_layers - 1)
+            )
+            output_in = hidden
+        else:
+            self.value_fc = nn.Identity()
+            self.adv_fc = nn.Identity()
+            self.value_hidden = nn.ModuleList()
+            self.adv_hidden = nn.ModuleList()
+            output_in = self.feature_dim
 
-        self.adv_fc = Linear(self.feature_dim, hidden)
-        self.adv_out = Linear(hidden, num_actions)
+        self.value_out = Linear(output_in, 1)
+        self.adv_out = Linear(output_in, num_actions)
 
     def forward(self, x):
         x = self.extract_features(x)
 
-        value = self.value_out(F.relu(self.value_fc(x)))
-        advantage = self.adv_out(F.relu(self.adv_fc(x)))
+        if self.hidden_layers > 0:
+            value = F.relu(self.value_fc(x))
+            advantage = F.relu(self.adv_fc(x))
+            for layer in self.value_hidden:
+                value = F.relu(layer(value))
+            for layer in self.adv_hidden:
+                advantage = F.relu(layer(advantage))
+        else:
+            value = advantage = x
+
+        value = self.value_out(value)
+        advantage = self.adv_out(advantage)
 
         return value + (advantage - advantage.mean(dim=1, keepdim=True))
 
@@ -247,7 +283,7 @@ class DistributionalDQN(ConvFeatureExtractor):
     """C51 network: predicts a probability distribution over return atoms."""
 
     def __init__(self, input_shape, num_actions, env_type, num_atoms=51,
-                 noisy=False, v_min=-10.0, v_max=10.0):
+                 noisy=False, v_min=-10.0, v_max=10.0, hidden_layers=1):
         super().__init__(input_shape, env_type)
 
         self.num_actions = num_actions
@@ -255,47 +291,53 @@ class DistributionalDQN(ConvFeatureExtractor):
         self.noisy = noisy
         self.v_min = float(v_min)
         self.v_max = float(v_max)
+        self.hidden_layers = hidden_layers
 
         if self.v_min >= self.v_max:
             raise ValueError("v_min must be smaller than v_max.")
 
         hidden = 128 if env_type == "minatar" else 512
-
         Linear = get_linear(noisy)
 
         # Fixed atom support z_i
         self.register_buffer("support", torch.linspace(self.v_min, self.v_max, num_atoms))
 
-        self.fc1 = Linear(self.feature_dim, hidden)
+        if hidden_layers > 0:
+            self.fc1 = Linear(self.feature_dim, hidden)
+            self.extra_fc = nn.ModuleList(
+                Linear(hidden, hidden) for _ in range(hidden_layers - 1)
+            )
+            output_in = hidden
+        else:
+            self.fc1 = nn.Identity()
+            self.extra_fc = nn.ModuleList()
+            output_in = self.feature_dim
 
-        self.fc2 = Linear(hidden, self.num_actions * self.num_atoms)
+        self.fc2 = Linear(output_in, self.num_actions * self.num_atoms)
 
     def dist(self, x):
-
         x = self.extract_features(x)
 
-        x = F.relu(self.fc1(x))
+        if self.hidden_layers > 0:
+            x = F.relu(self.fc1(x))
+            for layer in self.extra_fc:
+                x = F.relu(layer(x))
+
         logits = self.fc2(x)
-
         logits = logits.view(-1, self.num_actions, self.num_atoms)
-
         probs = F.softmax(logits, dim=2)
-
         return probs
 
-
     def forward(self, x):
-
         probs = self.dist(x)
-        q_values = torch.sum(probs * self.support.view(1, 1, -1),dim=2)
-
+        q_values = torch.sum(probs * self.support.view(1, 1, -1), dim=2)
         return q_values
 
 class DistributionalDuelDQN(ConvFeatureExtractor):
     """C51 + dueling architecture."""
 
     def __init__(self, input_shape, num_actions, env_type, num_atoms=51,
-                 noisy=False, v_min=-10.0, v_max=10.0):
+                 noisy=False, v_min=-10.0, v_max=10.0, hidden_layers=1):
         super().__init__(input_shape, env_type)
 
         self.num_actions = num_actions
@@ -303,43 +345,60 @@ class DistributionalDuelDQN(ConvFeatureExtractor):
         self.noisy = noisy
         self.v_min = float(v_min)
         self.v_max = float(v_max)
+        self.hidden_layers = hidden_layers
 
         if self.v_min >= self.v_max:
             raise ValueError("v_min must be smaller than v_max.")
 
         hidden = 128 if env_type == "minatar" else 512
-
         Linear = get_linear(noisy)
 
         # Fixed atom support z_i
         self.register_buffer("support", torch.linspace(self.v_min, self.v_max, num_atoms))
 
-        self.value_fc = Linear(self.feature_dim, hidden)
-        self.value_out = Linear(hidden,num_atoms)
+        if hidden_layers > 0:
+            self.value_fc = Linear(self.feature_dim, hidden)
+            self.adv_fc = Linear(self.feature_dim, hidden)
+            self.value_hidden = nn.ModuleList(
+                Linear(hidden, hidden) for _ in range(hidden_layers - 1)
+            )
+            self.adv_hidden = nn.ModuleList(
+                Linear(hidden, hidden) for _ in range(hidden_layers - 1)
+            )
+            output_in = hidden
+        else:
+            self.value_fc = nn.Identity()
+            self.adv_fc = nn.Identity()
+            self.value_hidden = nn.ModuleList()
+            self.adv_hidden = nn.ModuleList()
+            output_in = self.feature_dim
 
-        self.adv_fc = Linear(self.feature_dim, hidden)
-        self.adv_out = Linear(hidden, num_actions * num_atoms)
+        self.value_out = Linear(output_in, num_atoms)
+        self.adv_out = Linear(output_in, num_actions * num_atoms)
 
     def dist(self, x):
-
         x = self.extract_features(x)
-        
-        value = self.value_out(F.relu(self.value_fc(x)))
-        value = value.view(-1, 1, self.num_atoms)
 
-        advantage = self.adv_out(F.relu(self.adv_fc(x)))
-        advantage = advantage.view(-1, self.num_actions, self.num_atoms)
+        if self.hidden_layers > 0:
+            value = F.relu(self.value_fc(x))
+            advantage = F.relu(self.adv_fc(x))
+            for layer in self.value_hidden:
+                value = F.relu(layer(value))
+            for layer in self.adv_hidden:
+                advantage = F.relu(layer(advantage))
+        else:
+            value = advantage = x
+
+        value = self.value_out(value).view(-1, 1, self.num_atoms)
+        advantage = self.adv_out(advantage).view(-1, self.num_actions, self.num_atoms)
 
         logits = value + (advantage - advantage.mean(dim=1, keepdim=True))
         probs = F.softmax(logits, dim=2)
-
         return probs
 
     def forward(self, x):
-
         probs = self.dist(x)
         q_values = torch.sum(probs * self.support.view(1, 1, -1), dim=2)
-
         return q_values
 
 ###################################################
@@ -347,7 +406,8 @@ class DistributionalDuelDQN(ConvFeatureExtractor):
 ###################################################
 
 def build_network(input_shape, num_actions, env_type, network_type="dqn",
-                  noisy=False, num_atoms=51, v_min=-10.0, v_max=10.0):
+                  noisy=False, num_atoms=51, v_min=-10.0, v_max=10.0,
+                  hidden_layers=1):
 
     nets = {
         "dqn": DQN,
@@ -360,7 +420,7 @@ def build_network(input_shape, num_actions, env_type, network_type="dqn",
         raise ValueError(f"Unknown network_type: {network_type}")
 
     kwargs = dict(input_shape=input_shape, num_actions=num_actions,
-                  env_type=env_type, noisy=noisy)
+                  env_type=env_type, noisy=noisy, hidden_layers=hidden_layers)
 
     if "distributional" in network_type:
         # C51 support is configured outside the network.
@@ -380,7 +440,7 @@ class Estimator:
 
     def __init__(self, input_shape, num_actions, env_type,
                  network_type="dqn", noisy=False, num_atoms=51,
-                 v_min=-10.0, v_max=10.0,
+                 v_min=-10.0, v_max=10.0, hidden_layers=1,
                  scope="estimator", summaries_dir=None, device=None,
                  adam_lr=0.00025, adam_eps=1e-6):
 
@@ -391,7 +451,7 @@ class Estimator:
 
         self.model = build_network(
             input_shape, num_actions, env_type,
-            network_type, noisy, num_atoms, v_min, v_max
+            network_type, noisy, num_atoms, v_min, v_max, hidden_layers
         ).to(self.device)
 
         # Adam hyperparameters come from the experiment config.

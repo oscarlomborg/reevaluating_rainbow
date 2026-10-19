@@ -18,6 +18,14 @@ NUM_ATOMS = 51
 V_MIN = -100.0
 V_MAX = 100.0
 
+# MinAtar implementation:
+# "gym"    -> Gymnasium MinAtar environments
+# "native" -> minatar.Environment
+MINATAR_BACKEND = "native"
+
+# Number of fully connected hidden layers after the convolution
+HIDDEN_LAYERS = 0
+
 ENVIRONMENTS = [
     "MinAtar/Asterix-v1",
     "MinAtar/Breakout-v1",
