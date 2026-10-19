@@ -4,7 +4,7 @@ ENV_TYPE = "minatar"
 
 NAME = "no-distrib"
 
-NOOP_MAX = 5
+NOOP_MAX = 0 # TODO
 
 DOUBLE_DQN = True
 N_STEP = 3
@@ -34,7 +34,7 @@ ENVIRONMENTS = [
     "MinAtar/SpaceInvaders-v1",
 ]
 
-NUM_FRAMES = 10_000_000 # Agent steps #TODO adjust
+NUM_FRAMES = 10_000_000 # Agent steps
 
 REPLAY_PERIOD = 4 # Agent steps before update
 REPLAY_MEMORY_SIZE = 100_000
