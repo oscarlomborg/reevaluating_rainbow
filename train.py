@@ -465,11 +465,11 @@ def train_model(
             if total_t % cfg.REPLAY_PERIOD == 0:
 
                 # Sample uniformly or with PER.
-                beta = min(
-                    1.0,
-                    cfg.PER_BETA_START
-                    + total_t * (1.0 - cfg.PER_BETA_START) / max(1, cfg.PER_BETA_FRAMES),
-                )
+                # beta = min(
+                #     1.0,
+                #     cfg.PER_BETA_START
+                #     + total_t * (1.0 - cfg.PER_BETA_START) / max(1, cfg.PER_BETA_FRAMES),
+                # ) #TODO activate decaying beta
                 samples, indices, weights = replay.sample(cfg.BATCH_SIZE, beta)
                 states_b, actions_b, rewards_b, next_states_b, dones_b = map(np.array, zip(*samples))
 
