@@ -1,0 +1,44 @@
+# Git
+
+git fetch origin
+git switch main
+git reset --hard origin/main
+
+# Clean \logs
+
+## Bash (linux)
+rm -rf -- logs/* logs/.[!.]* logs/..?*
+
+## PowerShell (Windows)
+
+Get-ChildItem -Force .\logs | Remove-Item -Recurse -Force
+
+## HPC (Linux)
+
+cd ~/Documents/reevaluating-rainbow
+
+# General command line prompts
+
+tensorboard --logdir .\experiments
+
+conda env export --no-builds > environment.yml
+
+conda env create -f environment.yml
+
+conda env remove -n ENV_NAME
+
+conda env list
+
+# HPC node commands
+
+bqueues -l hpc # check queue and priority
+
+nodestat -F hpc # check available compute
+
+bjobs # check jobs
+
+source /dtu/projects/02613_2025/conda/conda_init.sh
+
+# To run scripts
+
+python train.py --config configs\minatar_rainbow.py --seeds 2

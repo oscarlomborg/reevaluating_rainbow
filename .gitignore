@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+
+.vscode/
+
+.ipynb_checkpoints/
+
+# Generated experiment output
+experiments/*
+logs/*
+
+# Generated plots
+*.png
