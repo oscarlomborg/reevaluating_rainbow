@@ -7,6 +7,11 @@ try:
 except ImportError:
     minatar = None
 
+try:
+    from minatar.gym import register_envs
+except ImportError:
+    register_envs = None
+
 ###################################################
 # Environment helpers
 ###################################################
@@ -97,6 +102,22 @@ def _minatar_game_name(env_id):
         "Seaquest": "seaquest",
         "SpaceInvaders": "space_invaders",
     }.get(name, name)
+
+def register_environment_type(cfg):
+    """Register packages needed by the selected environment type."""
+    if cfg.ENV_TYPE == "minatar":
+        if minatar is None:
+            raise ImportError(
+                "ENV_TYPE='minatar' requires the minatar package."
+            )
+
+        if cfg.MINATAR_BACKEND == "gym":
+            if register_envs is None:
+                raise ImportError(
+                    "MINATAR_BACKEND='gym' requires minatar.gym."
+                )
+
+            register_envs()
 
 class NativeMinAtarEnv(gym.Env):
     """Gymnasium API around minatar.Environment (full 6-action set)."""

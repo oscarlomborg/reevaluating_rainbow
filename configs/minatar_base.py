@@ -2,8 +2,6 @@
 
 ENV_TYPE = "minatar"
 
-NAME = "rainbow"
-
 NOOP_MAX = 0 # TODO
 
 DOUBLE_DQN = True
