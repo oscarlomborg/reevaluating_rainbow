@@ -1,22 +1,16 @@
-# %%
 import argparse
-import ctypes
 import importlib.util
 import itertools
 import multiprocessing as mp
 import os
 import random
-import sys
-from collections import deque, namedtuple
 from time import perf_counter
 
 # One numerical thread per worker.
 for variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
     os.environ[variable] = "1"
 
-import gymnasium as gym
 import numpy as np
-import psutil
 import torch
 
 try:
@@ -29,18 +23,9 @@ try:
 except ImportError:
     register_envs = None
 
-from SETUP import (
-    Estimator,
-    ModelParametersCopier,
-    StateProcessor,
-    build_c51_targets,
-    build_dqn_targets,
-    env_reset,
-    env_step,
-    evaluate_policy,
-    make_epsilon_greedy_policy,
-)
-
+from agent import Estimator
+from environments import StateProcessor, env_reset, make_env
+from training import train_model
 
 ###################################################
 # Config helpers
@@ -55,7 +40,7 @@ REQUIRED_CONFIG = (
     "DISCOUNT_FACTOR", "BATCH_SIZE", "TARGET_UPDATE_EVERY",
     "EPSILON_START", "EPSILON_END", "EPSILON_DECAY_STEPS",
     "EVAL_EVERY", "EVAL_LEN", "NOOP_MAX",
-    "ADAM_LR", "ADAM_EPS", "V_MIN", "V_MAX"
+    "ADAM_LR", "ADAM_EPS", "V_MIN", "V_MAX", "LOSS_FUNC", "WEIGHT_INIT"
 )
 
 
@@ -100,6 +85,10 @@ def validate_config(cfg):
         raise ValueError("EPSILON_DECAY_STEPS must be at least 1.")
     if cfg.NOOP_MAX < 0:
         raise ValueError("NOOP_MAX cannot be negative.")
+    if cfg.WEIGHT_INIT not in ("xavier_uniform", "pytorch_default"):
+        raise ValueError(f"Unknown WEIGHT_INIT: {cfg.WEIGHT_INIT}")
+    if cfg.LOSS_FUNC not in ("mse", "huber"):
+        raise ValueError(f"Unknown LOSS_FUNC: {cfg.LOSS_FUNC}")
 
     # Adam settings.
     if cfg.ADAM_LR <= 0:
@@ -135,467 +124,6 @@ def register_environment_type(cfg):
 def config_name(cfg):
     """Unique directory name for the selected ablation."""
     return f"{cfg.ENV_TYPE}_{cfg.NAME}"
-
-
-###################################################
-# Small helpers
-###################################################
-
-Transition = namedtuple("Transition", ["state", "action", "reward", "next_state", "done"])
-EpisodeStats = namedtuple("EpisodeStats", ["episode_lengths", "episode_rewards"])
-
-
-def _minatar_game_name(env_id):
-    """Convert e.g. MinAtar/SpaceInvaders-v1 -> space_invaders."""
-    name = env_id.split("/")[-1].rsplit("-v", 1)[0]
-    return {
-        "Asterix": "asterix",
-        "Breakout": "breakout",
-        "Freeway": "freeway",
-        "Seaquest": "seaquest",
-        "SpaceInvaders": "space_invaders",
-    }.get(name, name)
-
-
-class NativeMinAtarEnv(gym.Env):
-    """Gymnasium API around minatar.Environment (full 6-action set)."""
-
-    metadata = {}
-
-    def __init__(self, env_id):
-        super().__init__()
-        self.game = minatar.Environment(env_name=_minatar_game_name(env_id))
-        self.action_space = gym.spaces.Discrete(self.game.num_actions())
-        self.observation_space = gym.spaces.Box(
-            low=0, high=1, shape=tuple(self.game.state_shape()), dtype=np.bool_
-        )
-
-    def reset(self, *, seed=None, options=None):
-        super().reset(seed=seed)
-        if seed is not None:
-            self.game.seed(seed)
-        self.game.reset()
-        return self.game.state(), {}
-
-    def step(self, action):
-        reward, terminated = self.game.act(int(action))
-        return self.game.state(), float(reward), bool(terminated), False, {}
-
-
-def make_env(env_id, env_type, seed, noop_max=0, minatar_backend="gym"):
-    """Create a MinAtar or preprocessed Atari environment."""
-    if env_type == "minatar":
-        if minatar_backend == "native":
-            env = NativeMinAtarEnv(env_id)
-        else:
-            env = gym.make(env_id)
-    else:
-        # Atari preprocessing also handles Atari no-op starts.
-        env = gym.make(env_id, frameskip=1)
-        env = gym.wrappers.AtariPreprocessing(
-            env,
-            noop_max=noop_max,
-            frame_skip=4,
-            screen_size=84,
-            grayscale_obs=True,
-            scale_obs=False,
-        )
-        # Gymnasium renamed FrameStack -> FrameStackObservation in newer versions.
-        if hasattr(gym.wrappers, "FrameStackObservation"):
-            env = gym.wrappers.FrameStackObservation(env, stack_size=4)
-        else:
-            env = gym.wrappers.FrameStack(env, num_stack=4)
-
-    env.action_space.seed(seed)
-    env.observation_space.seed(seed)
-    return env
-
-
-###################################################
-# Replay buffer: uniform or prioritized
-###################################################
-
-class ReplayBuffer:
-    def __init__(self, capacity, prioritized=False, alpha=0.6, eps=1e-6):
-        self.capacity = capacity
-        self.prioritized = prioritized
-        self.alpha = alpha
-        self.eps = eps
-        self.data, self.pos = [], 0
-        self.priorities = np.zeros(capacity, dtype=np.float32)
-
-    def __len__(self):
-        return len(self.data)
-
-    def add(self, transition):
-        # New PER samples receive the current maximum priority.
-        priority = self.priorities[:len(self.data)].max() if self.data else 1.0
-        priority = max(float(priority), self.eps)
-
-        if len(self.data) < self.capacity:
-            self.data.append(transition)
-        else:
-            self.data[self.pos] = transition
-
-        self.priorities[self.pos] = priority
-        self.pos = (self.pos + 1) % self.capacity
-
-    def sample(self, batch_size, beta=1.0):
-        n = len(self.data)
-        if self.prioritized:
-            probs = self.priorities[:n] ** self.alpha
-            probs /= probs.sum()
-            indices = np.random.choice(n, batch_size, p=probs)
-            weights = (n * probs[indices]) ** (-beta)
-            weights /= weights.max()
-        else:
-            indices = np.random.choice(n, batch_size, replace=False)
-            weights = np.ones(batch_size, dtype=np.float32)
-
-        return [self.data[i] for i in indices], indices, weights.astype(np.float32)
-
-    def update_priorities(self, indices, priorities):
-        if self.prioritized:
-            self.priorities[indices] = np.maximum(np.asarray(priorities), self.eps)
-
-
-###################################################
-# N-step transition construction
-###################################################
-
-def _make_n_step(buffer, n_step, gamma):
-    """Collapse the oldest prefix into one n-step transition."""
-    first = buffer[0]
-    reward, next_state, done = 0.0, first.next_state, False
-
-    for i, tr in enumerate(list(buffer)[:n_step]):
-        reward += (gamma ** i) * tr.reward
-        next_state, done = tr.next_state, tr.done
-        if done:
-            break
-
-    return Transition(first.state, first.action, reward, next_state, done)
-
-
-def add_n_step(buffer, replay, transition, n_step, gamma):
-    """Add a raw transition and emit complete n-step transitions."""
-    buffer.append(transition)
-
-    if len(buffer) >= n_step:
-        replay.add(_make_n_step(buffer, n_step, gamma))
-        buffer.popleft()
-
-    # Flush shortened terminal prefixes; done=True means no bootstrap term.
-    if transition.done:
-        while buffer:
-            replay.add(_make_n_step(buffer, n_step, gamma))
-            buffer.popleft()
-
-
-###################################################
-# PER priority signal
-###################################################
-
-def replay_priorities(estimator, states, actions, targets, eps):
-    """TD error for scalar DQN; per-sample cross entropy for C51."""
-    idx = np.arange(len(actions))
-
-    if estimator.distributional:
-        pred = estimator.predict_dist(states)[idx, actions]
-        return -(targets * np.log(np.clip(pred, 1e-8, 1.0))).sum(axis=1) + eps
-
-    pred = estimator.predict(states)[idx, actions]
-    return np.abs(targets - pred) + eps
-
-
-###################################################
-# Training
-###################################################
-
-def train_model(
-    env, eval_env, env_id, q_estimator, target_estimator,
-    state_processor, cfg, seed_dir, seed=0,
-):
-    """Train one configurable DQN variant on one environment and seed."""
-
-    replay = ReplayBuffer(
-        cfg.REPLAY_MEMORY_SIZE,
-        prioritized=cfg.PRIORITIZED_REPLAY,
-        alpha=cfg.PER_ALPHA,
-        eps=cfg.PER_EPS,
-    )
-    nstep_buffer = deque()
-    copier = ModelParametersCopier(q_estimator, target_estimator)
-    current_process = psutil.Process()
-    current_process.cpu_percent(None)  # Prime CPU measurement.
-
-    # Work around large amounts of free native heap memory retained by glibc.
-    # Keep this independent of Python GC and tracemalloc. Disable by setting
-    # MALLOC_TRIM_EVERY=0, or tune the interval in environment steps.
-    trim_every = int(os.environ.get("MALLOC_TRIM_EVERY", "1000"))
-    if trim_every < 0:
-        raise ValueError("MALLOC_TRIM_EVERY must be nonnegative")
-    malloc_trim = None
-    if sys.platform == "linux" and trim_every:
-        try:
-            libc = ctypes.CDLL("libc.so.6")
-            malloc_trim = libc.malloc_trim
-            malloc_trim.argtypes = [ctypes.c_size_t]
-            malloc_trim.restype = ctypes.c_int
-        except (OSError, AttributeError):
-            print("[WARN] glibc malloc_trim unavailable; trimming disabled", flush=True)
-
-    checkpoint_dir = os.path.join(seed_dir, "checkpoints")
-    checkpoint_path = os.path.join(checkpoint_dir, "model.pt")
-    os.makedirs(checkpoint_dir, exist_ok=True)
-
-    total_t = 0
-
-    # Print five progress milestones per environment/seed (including warm-up).
-    progress_start = perf_counter()
-    progress_milestones = [
-        (percent, (cfg.NUM_FRAMES * percent + 99) // 100)
-        for percent in (20, 40, 60, 80, 100)
-    ]
-    next_progress = 0
-
-    def report_progress():
-        nonlocal next_progress
-        while (next_progress < len(progress_milestones)
-               and total_t >= progress_milestones[next_progress][1]):
-            percent, _ = progress_milestones[next_progress]
-            elapsed = perf_counter() - progress_start
-            print(
-                f"[PROGRESS] env={env_id} seed={seed} "
-                f"{percent}% ({total_t:,}/{cfg.NUM_FRAMES:,} steps) "
-                f"elapsed={int(elapsed // 3600):02d}:{int(elapsed % 3600 // 60):02d}",
-                flush=True,
-            )
-            next_progress += 1
-
-    episode_lengths, episode_rewards = [], []
-    evaluation_frames, evaluation_returns, evaluation_mean_returns = [], [], []
-
-    # Start every run from a fresh model.
-    copier.make()
-
-    next_eval_t = ((total_t // cfg.EVAL_EVERY) + 1) * cfg.EVAL_EVERY
-    epsilons = np.linspace(
-        cfg.EPSILON_START, cfg.EPSILON_END, cfg.EPSILON_DECAY_STEPS, dtype=np.float32
-    )
-    policy = make_epsilon_greedy_policy(
-        q_estimator, env.action_space.n, use_noisy_exploration=cfg.NOISY
-    )
-
-    # MinAtar uses our reset helper for no-op starts.
-    # AtariPreprocessing already performs Atari no-op starts.
-    reset_noop_max = cfg.NOOP_MAX if cfg.ENV_TYPE == "minatar" else 0
-
-    # --------------------------------------------------
-    # Populate replay memory.
-    # --------------------------------------------------
-    state = state_processor.process(
-        env_reset(env, seed=seed, noop_max=reset_noop_max)
-    )
-    while len(replay) < cfg.REPLAY_MEMORY_INIT_SIZE and total_t < cfg.NUM_FRAMES:
-        # NoisyNet replaces epsilon-greedy exploration.
-        epsilon = 0.0 if cfg.NOISY else 1.0
-        action = policy(state, epsilon)
-        next_state, reward, done, _ = env_step(env, action)
-        next_state = state_processor.process(next_state)
-
-        add_n_step(
-            nstep_buffer, replay,
-            Transition(state, action, reward, next_state, done),
-            cfg.N_STEP, cfg.DISCOUNT_FACTOR,
-        )
-        total_t += 1
-        if malloc_trim is not None and total_t % trim_every == 0:
-            malloc_trim(0)
-        report_progress()
-        # Seed only the first reset; later resets continue the RNG sequence.
-        state = (
-            state_processor.process(env_reset(env, noop_max=reset_noop_max))
-            if done else next_state
-        )
-
-    # Discard an unfinished warm-up prefix before measured episodes.
-    nstep_buffer.clear()
-
-    # Replay memory is now populated.
-    # Epsilon decay starts from this point.
-    learning_start_t = total_t
-
-    # --------------------------------------------------
-    # Main loop.
-    # --------------------------------------------------
-    i_episode = 0
-    beta = cfg.PER_BETA_START  # Safe initial value for logging.
-
-    while total_t < cfg.NUM_FRAMES:
-        # Start a new episode without reseeding the environment.
-        state = state_processor.process(env_reset(env, noop_max=reset_noop_max))
-        nstep_buffer.clear()
-        episode_reward = episode_length = 0
-
-        for _ in itertools.count():
-
-            # Number of environment steps since learning started.
-            training_t = total_t - learning_start_t
-
-            # NoisyNet exploration uses epsilon = 0.
-            epsilon = 0.0 if cfg.NOISY else epsilons[min(training_t, cfg.EPSILON_DECAY_STEPS - 1)]
-
-            if total_t % cfg.TARGET_UPDATE_EVERY == 0:
-                copier.make()
-
-            action = policy(state, epsilon)
-            next_state, reward, done, _ = env_step(env, action)
-            next_state = state_processor.process(next_state)
-
-            add_n_step(
-                nstep_buffer, replay,
-                Transition(state, action, reward, next_state, done),
-                cfg.N_STEP, cfg.DISCOUNT_FACTOR,
-            )
-
-            episode_reward += reward
-            episode_length += 1
-
-            if total_t % cfg.REPLAY_PERIOD == 0:
-
-                # Sample uniformly or with PER.
-                # beta = min(
-                #     1.0,
-                #     cfg.PER_BETA_START
-                #     + total_t * (1.0 - cfg.PER_BETA_START) / max(1, cfg.PER_BETA_FRAMES),
-                # ) #TODO activate decaying beta
-                samples, indices, weights = replay.sample(cfg.BATCH_SIZE, beta)
-                states_b, actions_b, rewards_b, next_states_b, dones_b = map(np.array, zip(*samples))
-
-                # n-step target uses gamma^n; terminal shortened prefixes do not bootstrap.
-                gamma_n = cfg.DISCOUNT_FACTOR ** cfg.N_STEP
-                target_fn = build_c51_targets if q_estimator.distributional else build_dqn_targets
-                targets = target_fn(
-                    q_estimator, target_estimator, next_states_b,
-                    rewards_b, dones_b, gamma_n, cfg.DOUBLE_DQN,
-                )
-
-                # PER: priority controls sampling; IS weights correct the update bias.
-                priorities = None
-                if cfg.PRIORITIZED_REPLAY:
-                    priorities = replay_priorities(
-                        q_estimator, states_b, actions_b, targets, cfg.PER_EPS
-                    )
-
-                q_estimator.update(
-                    states_b, actions_b, targets,
-                    weights=weights if cfg.PRIORITIZED_REPLAY else None,
-                )
-                if cfg.PRIORITIZED_REPLAY:
-                    replay.update_priorities(indices, priorities)
-
-            total_t += 1
-            if malloc_trim is not None and total_t % trim_every == 0:
-                malloc_trim(0)
-            report_progress()
-
-            # Validation.
-            if total_t >= next_eval_t:
-                result = evaluate_policy(
-                    eval_env, q_estimator, state_processor,
-                    eval_len=cfg.EVAL_LEN, seed=seed + 1,
-                    noop_max=reset_noop_max,
-                )
-                eval_rewards, eval_lengths = result["rewards"], result["lengths"]
-                mean_return = float(np.mean(eval_rewards)) if len(eval_rewards) else np.nan
-
-                evaluation_frames.append(total_t)
-                evaluation_returns.append(eval_rewards.copy())
-                evaluation_mean_returns.append(mean_return)
-                np.savez(
-                    os.path.join(seed_dir, "evaluation.npz"),
-                    frames=np.asarray(evaluation_frames, dtype=np.int64),
-                    mean_returns=np.asarray(evaluation_mean_returns, dtype=np.float32),
-                    raw_returns=np.asarray(evaluation_returns, dtype=object),
-                    seed=seed,
-                    game=env_id,
-                )
-
-                writer = q_estimator.summary_writer
-                if writer is not None and len(eval_rewards):
-                    writer.add_scalar("eval/return_mean", mean_return, total_t)
-                    writer.add_scalar("eval/return_median", float(np.median(eval_rewards)), total_t)
-                    writer.add_scalar("eval/episode_length_mean", float(np.mean(eval_lengths)), total_t)
-                    writer.add_scalar("eval/num_episodes", len(eval_rewards), total_t)
-                    writer.flush()
-
-                next_eval_t = ((total_t // cfg.EVAL_EVERY) + 1) * cfg.EVAL_EVERY
-
-            if done or total_t >= cfg.NUM_FRAMES:
-                break
-            state = next_state
-
-        episode_rewards.append(episode_reward)
-        episode_lengths.append(episode_length)
-        i_episode += 1
-
-        # TensorBoard episode/system statistics.
-        writer = q_estimator.summary_writer
-        if writer is not None:
-            writer.add_scalar("episode/epsilon", float(epsilon), i_episode)
-            writer.add_scalar("episode/reward", float(episode_reward), i_episode)
-            writer.add_scalar("episode/length", int(episode_length), i_episode)
-            mem = current_process.memory_info()
-            writer.add_scalar("system/memory_rss_mb", mem.rss / 1024**2, total_t)
-            writer.add_scalar("system/memory_vms_mb", mem.vms / 1024**2, total_t)
-            if cfg.PRIORITIZED_REPLAY:
-                writer.add_scalar("replay/beta", beta, total_t)
-            writer.flush()
-
-    # Save model
-    torch.save(
-        {
-            "q_estimator": q_estimator.model.state_dict(),
-            "target_estimator": target_estimator.model.state_dict(),
-            "optimizer": q_estimator.optimizer.state_dict(),
-            "global_step": q_estimator.global_step,
-            "total_t": total_t,
-            "episode": i_episode,
-            "episode_lengths": np.asarray(episode_lengths, dtype=np.int64),
-            "episode_rewards": np.asarray(episode_rewards, dtype=np.float32),
-            "config": {
-                "env_type": cfg.ENV_TYPE,
-                "network_type": cfg.NETWORK_TYPE,
-                "double_dqn": cfg.DOUBLE_DQN,
-                "n_step": cfg.N_STEP,
-                "prioritized_replay": cfg.PRIORITIZED_REPLAY,
-                "noisy": cfg.NOISY,
-                "num_atoms": cfg.NUM_ATOMS,
-                "v_min": cfg.V_MIN,
-                "v_max": cfg.V_MAX,
-                "adam_lr": cfg.ADAM_LR,
-                "adam_eps": cfg.ADAM_EPS,
-                "hidden_layers": cfg.HIDDEN_LAYERS,
-                "minatar_backend": cfg.MINATAR_BACKEND,
-            },
-        },
-        checkpoint_path,
-    )
-
-    stats = EpisodeStats(
-        np.asarray(episode_lengths, dtype=np.int64),
-        np.asarray(episode_rewards, dtype=np.float32),
-    )
-    np.savez(
-        os.path.join(seed_dir, "training.npz"),
-        episode_lengths=stats.episode_lengths,
-        episode_rewards=stats.episode_rewards,
-        seed=seed,
-        game=env_id,
-    )
-    return stats
-
 
 ###################################################
 # Parallel worker
@@ -653,11 +181,13 @@ def run_job(job):
             num_actions=num_actions,
             env_type=cfg.ENV_TYPE,
             network_type=cfg.NETWORK_TYPE,
+            loss_func=cfg.LOSS_FUNC,
             noisy=cfg.NOISY,
             num_atoms=cfg.NUM_ATOMS,
             v_min=cfg.V_MIN,
             v_max=cfg.V_MAX,
             hidden_layers=cfg.HIDDEN_LAYERS,
+            weight_init=cfg.WEIGHT_INIT,
             adam_lr=cfg.ADAM_LR,
             adam_eps=cfg.ADAM_EPS,
             device=device,

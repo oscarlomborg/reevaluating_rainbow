@@ -405,9 +405,25 @@ class DistributionalDuelDQN(ConvFeatureExtractor):
 # Network factory
 ###################################################
 
+def init_weights(module, init_type="pytorch_default"):
+    if not isinstance(module, (nn.Conv2d, nn.Linear)):
+        return
+
+    if init_type == "pytorch_default":
+        return
+    
+    if init_type == "xavier_uniform":
+        nn.init.xavier_uniform_(module.weight)
+
+    else:
+        raise ValueError(f"Unknown initialization: {init_type}")
+
+    if module.bias is not None:
+        nn.init.zeros_(module.bias)
+
 def build_network(input_shape, num_actions, env_type, network_type="dqn",
                   noisy=False, num_atoms=51, v_min=-10.0, v_max=10.0,
-                  hidden_layers=1):
+                  hidden_layers=1, weight_init="pytorch_default"):
 
     nets = {
         "dqn": DQN,
@@ -428,7 +444,11 @@ def build_network(input_shape, num_actions, env_type, network_type="dqn",
         kwargs["v_min"] = v_min
         kwargs["v_max"] = v_max
 
-    return nets[network_type](**kwargs)
+    model = nets[network_type](**kwargs)
+
+    model.apply(lambda m: init_weights(m, init_type=weight_init))
+
+    return model
 
 
 ###################################################
@@ -439,8 +459,8 @@ class Estimator:
     """Wrap the network, optimizer, prediction, and training update."""
 
     def __init__(self, input_shape, num_actions, env_type,
-                 network_type="dqn", noisy=False, num_atoms=51,
-                 v_min=-10.0, v_max=10.0, hidden_layers=1,
+                 network_type="dqn", loss_func="mse", noisy=False, num_atoms=51,
+                 v_min=-10.0, v_max=10.0, hidden_layers=1, weight_init="pytorch_default",
                  scope="estimator", summaries_dir=None, device=None,
                  adam_lr=0.00025, adam_eps=1e-6):
 
@@ -448,10 +468,11 @@ class Estimator:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.noisy = noisy
         self.distributional = "distributional" in network_type
+        self.loss_func = loss_func.lower()
 
         self.model = build_network(
             input_shape, num_actions, env_type,
-            network_type, noisy, num_atoms, v_min, v_max, hidden_layers
+            network_type, noisy, num_atoms, v_min, v_max, hidden_layers, weight_init
         ).to(self.device)
 
         # Adam hyperparameters come from the experiment config.
@@ -469,7 +490,6 @@ class Estimator:
             os.makedirs(path, exist_ok=True)
             self.summary_writer = SummaryWriter(path)
 
-
     def _to_tensor(self, x):
         return torch.as_tensor(np.asarray(x), dtype=torch.uint8, device=self.device)
 
@@ -481,7 +501,6 @@ class Estimator:
             self.model.reset_noise()
         else:
             self.model.eval()
-
 
     @torch.no_grad()
     def predict(self, states, use_noise=False):
@@ -534,10 +553,21 @@ class Estimator:
             q_values = (probs * self.model.support.view(1, 1, -1)).sum(dim=2)
 
         else:
-            # Standard squared TD error
+            # Loss of TD error
             q_values = self.model(states)
             action_q = q_values.gather(1, actions[:, None]).squeeze(1)
-            losses = (targets - action_q).pow(2)
+
+            if self.loss_func == "mse":
+                losses = (targets - action_q).pow(2)
+
+            elif self.loss_func == "huber":
+                losses = F.smooth_l1_loss(
+                    action_q,
+                    targets,
+                    reduction="none",
+                )
+            else:
+                raise ValueError(f"Unknown loss function: {self.loss_func}")
 
         # Prioritized replay importance weights
         if weights is not None:
@@ -553,9 +583,9 @@ class Estimator:
         self.global_step += 1
 
         # TensorBoard
-        if self.summary_writer and self.global_step % 1000 == 0:
-            s = self.global_step
-            self.summary_writer.add_scalar("train/loss", loss.item(), s)
+        # if self.summary_writer and self.global_step % 1000 == 0:
+        #     s = self.global_step
+        #     self.summary_writer.add_scalar("train/loss", loss.item(), s)
 
         return loss.item()
 
