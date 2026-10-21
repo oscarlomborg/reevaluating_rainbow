@@ -31,6 +31,13 @@ conda env remove -n ENV_NAME
 
 conda env list
 
+# Transfer from HPC to local machine
+
+cd "C:\Users\oloms\Desktop\Bachelor project\Code"
+
+scp -r gbar1:Documents/reevaluating_rainbow/experiments .
+
+
 # HPC node commands
 
 bqueues -l hpc # check queue and priority

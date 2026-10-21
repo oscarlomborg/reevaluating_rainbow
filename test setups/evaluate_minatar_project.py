@@ -63,11 +63,11 @@ import numpy as np
 EXPERIMENTS = {
     "DQN": Path("./experiments/minatar_dqn"),
     "Rainbow": Path("./experiments/minatar_rainbow"),
-    "No PER": Path("./experiments/minatar_no-per"),
-    "No n-step": Path("./experiments/minatar_no-nstep"),
-    "No dueling": Path("./experiments/minatar_no-duel"),
+    # "No PER": Path("./experiments/minatar_no-per"),
+    # "No n-step": Path("./experiments/minatar_no-nstep"),
+    # "No dueling": Path("./experiments/minatar_no-duel"),
     # "No distributional": Path("./experiments/minatar_no-distrib"),
-    "No noisy": Path("./experiments/minatar_no-noisy"),
+    # "No noisy": Path("./experiments/minatar_no-noisy"),
     # "No double": Path("./experiments/minatar_no-double"),
 }
 
@@ -77,7 +77,7 @@ GAMES = [
     "MinAtar_Asterix-v1",
     "MinAtar_Breakout-v1",
     "MinAtar_Freeway-v1",
-    # "MinAtar_Seaquest-v1",
+    "MinAtar_Seaquest-v1",
     "MinAtar_SpaceInvaders-v1",
 ]
 
