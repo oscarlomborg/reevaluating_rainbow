@@ -16,20 +16,16 @@ NUM_ATOMS = 51
 V_MIN = -100.0
 V_MAX = 100.0
 
-# MinAtar implementation:
-# "gym"    -> Gymnasium MinAtar environments
-# "native" -> minatar.Environment
-MINATAR_BACKEND = "native"
-
 # Number of fully connected hidden layers after the convolution.
 HIDDEN_LAYERS = 0
 
+#-v1 for minimal action space, -v0 for full action space
 ENVIRONMENTS = [
-    "MinAtar/Asterix-v1",
-    "MinAtar/Breakout-v1",
-    "MinAtar/Freeway-v1",
-    "MinAtar/Seaquest-v1",
-    "MinAtar/SpaceInvaders-v1",
+    "MinAtar/Asterix-v0",
+    "MinAtar/Breakout-v0",
+    "MinAtar/Freeway-v0",
+    "MinAtar/Seaquest-v0",
+    "MinAtar/SpaceInvaders-v0",
 ]
 
 NUM_FRAMES = 10_000_000 # Agent steps

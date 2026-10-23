@@ -8,7 +8,7 @@ import torch.nn.functional as F
 ###################################################
 
 class NoisyLinear(nn.Module):
-    def __init__(self, in_features, out_features, sigma0=0.1): #TODO change to sigma0=0.5
+    def __init__(self, in_features, out_features, sigma0=0.1): #TODO changed from sigma0=0.5
         super().__init__()
 
         self.in_features = in_features

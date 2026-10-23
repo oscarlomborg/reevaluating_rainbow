@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 from agent import Estimator
-from environments import StateProcessor, env_reset, make_env, register_environment_type
+from environments import StateProcessor, env_reset, make_env
 from training import train_model
 from config_utils import build_config, validate_config, config_name
 
@@ -30,7 +30,6 @@ def run_job(job):
         ablation_name=ablation_name,
     )
     validate_config(cfg)
-    register_environment_type(cfg)
 
     torch.set_num_threads(1)
     device = torch.device("cpu")
@@ -41,7 +40,7 @@ def run_job(job):
 
     name = config_name(cfg)
     game_name = env_id.replace("/", "_")
-    seed_dir = os.path.abspath(os.path.join("experiments", name, game_name, f"seed_{seed}"))
+    seed_dir = os.path.abspath(os.path.join("experiments", cfg.ENV_TYPE, cfg.SETUP, cfg.ABLATION, game_name, f"seed_{seed}"))
     os.makedirs(seed_dir, exist_ok=True)
 
     env = eval_env = q_estimator = target_estimator = None
@@ -55,12 +54,10 @@ def run_job(job):
     try:
         # AtariPreprocessing receives NOOP_MAX directly.
         env = make_env(
-            env_id, cfg.ENV_TYPE, seed, noop_max=cfg.NOOP_MAX,
-            minatar_backend=getattr(cfg, "MINATAR_BACKEND", "gym"),
+            env_id, cfg.ENV_TYPE, seed, noop_max=cfg.NOOP_MAX
         )
         eval_env = make_env(
-            env_id, cfg.ENV_TYPE, seed + 1, noop_max=cfg.NOOP_MAX,
-            minatar_backend=getattr(cfg, "MINATAR_BACKEND", "gym"),
+            env_id, cfg.ENV_TYPE, seed + 1, noop_max=cfg.NOOP_MAX
         )
 
         state_processor = StateProcessor(cfg.ENV_TYPE)

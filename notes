@@ -50,4 +50,4 @@ source /dtu/projects/02613_2025/conda/conda_init.sh
 
 # To run scripts
 
-python train.py --env-type minatar --setup setup1 --ablation rainbow --seeds 4
+python train.py --env-type minatar --setup setup1 --ablation rainbow --max-procs 4 --seeds 4

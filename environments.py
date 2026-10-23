@@ -12,6 +12,14 @@ try:
 except ImportError:
     register_envs = None
 
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*environment MinAtar/.*-v0 is out of date.*",
+    category=DeprecationWarning,
+)
+
 ###################################################
 # Environment helpers
 ###################################################
@@ -92,65 +100,12 @@ class StateProcessor:
 # Small helpers
 ###################################################
 
-def _minatar_game_name(env_id):
-    """Convert e.g. MinAtar/SpaceInvaders-v1 -> space_invaders."""
-    name = env_id.split("/")[-1].rsplit("-v", 1)[0]
-    return {
-        "Asterix": "asterix",
-        "Breakout": "breakout",
-        "Freeway": "freeway",
-        "Seaquest": "seaquest",
-        "SpaceInvaders": "space_invaders",
-    }.get(name, name)
-
-def register_environment_type(cfg):
-    """Register packages needed by the selected environment type."""
-    if cfg.ENV_TYPE == "minatar":
-        if minatar is None:
-            raise ImportError(
-                "ENV_TYPE='minatar' requires the minatar package."
-            )
-
-        if cfg.MINATAR_BACKEND == "gym":
-            if register_envs is None:
-                raise ImportError(
-                    "MINATAR_BACKEND='gym' requires minatar.gym."
-                )
-
-            register_envs()
-
-class NativeMinAtarEnv(gym.Env):
-    """Gymnasium API around minatar.Environment (full 6-action set)."""
-
-    metadata = {}
-
-    def __init__(self, env_id):
-        super().__init__()
-        self.game = minatar.Environment(env_name=_minatar_game_name(env_id))
-        self.action_space = gym.spaces.Discrete(self.game.num_actions())
-        self.observation_space = gym.spaces.Box(
-            low=0, high=1, shape=tuple(self.game.state_shape()), dtype=np.bool_
-        )
-
-    def reset(self, *, seed=None, options=None):
-        super().reset(seed=seed)
-        if seed is not None:
-            self.game.seed(seed)
-        self.game.reset()
-        return self.game.state(), {}
-
-    def step(self, action):
-        reward, terminated = self.game.act(int(action))
-        return self.game.state(), float(reward), bool(terminated), False, {}
-
-
-def make_env(env_id, env_type, seed, noop_max=0, minatar_backend="gym"):
+def make_env(env_id, env_type, seed, noop_max=0):
     """Create a MinAtar or preprocessed Atari environment."""
     if env_type == "minatar":
-        if minatar_backend == "native":
-            env = NativeMinAtarEnv(env_id)
-        else:
-            env = gym.make(env_id)
+        if env_id not in gym.registry:
+            register_envs()
+        env = gym.make(env_id, sticky_action_prob=0.1, difficulty_ramping=True)
     else:
         # Atari preprocessing also handles Atari no-op starts.
         env = gym.make(env_id, frameskip=1)

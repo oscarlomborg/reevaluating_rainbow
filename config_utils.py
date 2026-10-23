@@ -25,7 +25,7 @@ REQUIRED_CONFIG = (
     "EPSILON_START", "EPSILON_END", "EPSILON_DECAY_STEPS",
     "EVAL_EVERY", "EVAL_LEN", "NOOP_MAX",
     "ADAM_LR", "ADAM_EPS", "V_MIN", "V_MAX", "LOSS_FUNC", "WEIGHT_INIT",
-    "HIDDEN_LAYERS", "MINATAR_BACKEND"
+    "HIDDEN_LAYERS"
 )
 
 def build_config(env_type, setup_name, ablation_name):
@@ -68,11 +68,6 @@ def validate_config(cfg):
         raise ValueError(f"Unknown NETWORK_TYPE: {cfg.NETWORK_TYPE}")
     if not isinstance(cfg.HIDDEN_LAYERS, int) or cfg.HIDDEN_LAYERS < 0:
         raise ValueError("HIDDEN_LAYERS must be a nonnegative integer.")
-    if cfg.ENV_TYPE == "minatar":
-        if cfg.MINATAR_BACKEND not in ("gym", "native"):
-            raise ValueError(
-                "MINATAR_BACKEND must be 'gym' or 'native'."
-            )
     if cfg.N_STEP < 1:
         raise ValueError("N_STEP must be at least 1.")
     if cfg.REPLAY_PERIOD < 1:
@@ -109,4 +104,4 @@ def validate_config(cfg):
 
 def config_name(cfg):
     """Unique directory name for the selected ablation."""
-    return f"{cfg.ENV_TYPE}_{cfg.NAME}"
+    return f"{cfg.ENV_TYPE}/{cfg.SETUP}/{cfg.ABLATION}"
