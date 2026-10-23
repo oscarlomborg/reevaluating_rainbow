@@ -302,8 +302,7 @@ def train_model(
                 "adam_lr": cfg.ADAM_LR,
                 "adam_eps": cfg.ADAM_EPS,
                 "hidden_layers": cfg.HIDDEN_LAYERS,
-                "weight_init": cfg.WEIGHT_INIT,
-                "minatar_backend": cfg.MINATAR_BACKEND,
+                "weight_init": cfg.WEIGHT_INIT
             },
         },
         checkpoint_path,
