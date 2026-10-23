@@ -52,7 +52,7 @@ EVAL_LEN = 125_000
 
 LOSS_FUNC = "mse" # "mse" or "huber"
 
-WEIGHT_INIT = "pytorch_default" # "pytorch_default" or "xavier_uniform"
+WEIGHT_INIT = "kaiming_uniform" # "kaiming_uniform" or "xavier_uniform"
 
 ADAM_LR = 2.5e-4
 ADAM_EPS = 3.125e-4

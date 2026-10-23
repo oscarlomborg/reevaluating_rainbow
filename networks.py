@@ -323,12 +323,12 @@ class DistributionalDuelDQN(ConvFeatureExtractor):
 # Network construction and initialization
 ###################################################
 
-def init_weights(module, init_type="pytorch_default"):
+def init_weights(module, init_type="kaiming_uniform"):
     if not isinstance(module, (nn.Conv2d, nn.Linear)):
         return
 
-    if init_type == "pytorch_default":
-        return
+    if init_type == "kaiming_uniform":
+        nn.init.kaiming_uniform_(module.weight, nonlinearity="relu")
     
     if init_type == "xavier_uniform":
         nn.init.xavier_uniform_(module.weight)
@@ -341,7 +341,7 @@ def init_weights(module, init_type="pytorch_default"):
 
 def build_network(input_shape, num_actions, env_type, network_type="dqn",
                   noisy=False, num_atoms=51, v_min=-10.0, v_max=10.0,
-                  hidden_layers=1, weight_init="pytorch_default"):
+                  hidden_layers=1, weight_init="kaiming_uniform"):
 
     nets = {
         "dqn": DQN,

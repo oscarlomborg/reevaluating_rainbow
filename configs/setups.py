@@ -8,6 +8,6 @@ SETUPS = {
     "setup2": {
         "LOSS_FUNC": "mse",
         "HIDDEN_LAYERS": 1,
-        "WEIGHT_INIT": "pytorch_default",
+        "WEIGHT_INIT": "kaiming_uniform",
     }
 }

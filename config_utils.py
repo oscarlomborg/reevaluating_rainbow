@@ -78,7 +78,7 @@ def validate_config(cfg):
         raise ValueError("EPSILON_DECAY_STEPS must be at least 1.")
     if cfg.NOOP_MAX < 0:
         raise ValueError("NOOP_MAX cannot be negative.")
-    if cfg.WEIGHT_INIT not in ("xavier_uniform", "pytorch_default"):
+    if cfg.WEIGHT_INIT not in ("xavier_uniform", "kaiming_uniform"):
         raise ValueError(f"Unknown WEIGHT_INIT: {cfg.WEIGHT_INIT}")
     if cfg.LOSS_FUNC not in ("mse", "huber"):
         raise ValueError(f"Unknown LOSS_FUNC: {cfg.LOSS_FUNC}")
