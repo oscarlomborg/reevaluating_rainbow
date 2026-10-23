@@ -330,7 +330,7 @@ def init_weights(module, init_type="kaiming_uniform"):
     if init_type == "kaiming_uniform":
         nn.init.kaiming_uniform_(module.weight, nonlinearity="relu")
     
-    if init_type == "xavier_uniform":
+    elif init_type == "xavier_uniform":
         nn.init.xavier_uniform_(module.weight)
 
     else:
