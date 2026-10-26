@@ -128,9 +128,14 @@ def train_model(
         next_state, reward, done, _ = env_step(env, action)
         next_state = state_processor.process(next_state)
 
+        learning_reward = (
+            float(np.clip(reward, -1.0, 1.0))
+            if cfg.CLIP_REWARDS else reward
+        )
+
         add_n_step(
             nstep_buffer, replay,
-            Transition(state, action, reward, next_state, done),
+            Transition(state, action, learning_reward, next_state, done),
             cfg.N_STEP, cfg.DISCOUNT_FACTOR,
         )
         total_t += 1
@@ -177,9 +182,14 @@ def train_model(
             next_state, reward, done, _ = env_step(env, action)
             next_state = state_processor.process(next_state)
 
+            learning_reward = (
+                float(np.clip(reward, -1.0, 1.0))
+                if cfg.CLIP_REWARDS else reward
+            )
+
             add_n_step(
                 nstep_buffer, replay,
-                Transition(state, action, reward, next_state, done),
+                Transition(state, action, learning_reward, next_state, done),
                 cfg.N_STEP, cfg.DISCOUNT_FACTOR,
             )
 
@@ -302,7 +312,8 @@ def train_model(
                 "adam_lr": cfg.ADAM_LR,
                 "adam_eps": cfg.ADAM_EPS,
                 "hidden_layers": cfg.HIDDEN_LAYERS,
-                "weight_init": cfg.WEIGHT_INIT
+                "weight_init": cfg.WEIGHT_INIT,
+                "clip_rewards": cfg.CLIP_REWARDS,
             },
         },
         checkpoint_path,
