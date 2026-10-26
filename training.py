@@ -123,7 +123,7 @@ def train_model(
     )
     while len(replay) < cfg.REPLAY_MEMORY_INIT_SIZE and total_t < cfg.NUM_FRAMES:
         # NoisyNet replaces epsilon-greedy exploration.
-        epsilon = 0.0 if cfg.NOISY else 1.0
+        epsilon = cfg.EPSILON_END if cfg.NOISY else 1.0
         action = policy(state, epsilon)
         next_state, reward, done, _ = env_step(env, action)
         next_state = state_processor.process(next_state)
@@ -168,7 +168,7 @@ def train_model(
             training_t = total_t - learning_start_t
 
             # NoisyNet exploration uses epsilon = 0.
-            epsilon = 0.0 if cfg.NOISY else epsilons[min(training_t, cfg.EPSILON_DECAY_STEPS - 1)]
+            epsilon = cfg.EPSILON_END if cfg.NOISY else epsilons[min(training_t, cfg.EPSILON_DECAY_STEPS - 1)]
 
             if total_t % cfg.TARGET_UPDATE_EVERY == 0:
                 copier.make()
@@ -206,18 +206,18 @@ def train_model(
                 )
 
                 # PER: priority controls sampling; IS weights correct the update bias.
-                priorities = None
-                if cfg.PRIORITIZED_REPLAY:
-                    priorities = replay_priorities(
-                        q_estimator, states_b, actions_b, targets, cfg.PER_EPS
-                    )
-
-                q_estimator.update(
-                    states_b, actions_b, targets,
+                _, per_sample_losses = q_estimator.update(
+                    states_b,
+                    actions_b,
+                    targets,
                     weights=weights if cfg.PRIORITIZED_REPLAY else None,
                 )
+
                 if cfg.PRIORITIZED_REPLAY:
-                    replay.update_priorities(indices, priorities)
+                    replay.update_priorities(
+                        indices,
+                        per_sample_losses + 1e-10
+                    )
 
             total_t += 1
             if malloc_trim is not None and total_t % trim_every == 0:
@@ -229,7 +229,7 @@ def train_model(
                 result = evaluate_policy(
                     eval_env, q_estimator, state_processor,
                     eval_len=cfg.EVAL_LEN, seed=seed + 1,
-                    noop_max=reset_noop_max,
+                    noop_max=reset_noop_max, use_noise=cfg.NOISY,
                 )
                 eval_rewards, eval_lengths = result["rewards"], result["lengths"]
                 mean_return = float(np.mean(eval_rewards)) if len(eval_rewards) else np.nan
@@ -273,8 +273,8 @@ def train_model(
             mem = current_process.memory_info()
             writer.add_scalar("system/memory_rss_mb", mem.rss / 1024**2, total_t)
             writer.add_scalar("system/memory_vms_mb", mem.vms / 1024**2, total_t)
-            if cfg.PRIORITIZED_REPLAY:
-                writer.add_scalar("replay/beta", beta, total_t)
+            # if cfg.PRIORITIZED_REPLAY:
+            #     writer.add_scalar("replay/beta", beta, total_t)
             writer.flush()
 
     # Save model

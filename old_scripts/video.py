@@ -6,7 +6,8 @@ import torch
 from gymnasium.wrappers import RecordVideo
 from minatar.gym import register_envs
 
-from SETUP_v6 import Estimator, StateProcessor
+from agent import Estimator
+from environments import StateProcessor
 
 register_envs()
 

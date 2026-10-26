@@ -47,12 +47,12 @@ EPSILON_START = 1.0
 EPSILON_END = 0.01
 EPSILON_DECAY_STEPS = 250_000
 
-EVAL_EVERY = 500_000
+EVAL_EVERY = 1_000_000
 EVAL_LEN = 125_000
 
-LOSS_FUNC = "mse" # "mse" or "huber"
+LOSS_FUNC = "huber" # "mse" or "huber"
 
-WEIGHT_INIT = "kaiming_uniform" # "kaiming_uniform" or "xavier_uniform"
+WEIGHT_INIT = "xavier_uniform" # "kaiming_uniform" or "xavier_uniform"
 
 ADAM_LR = 2.5e-4
 ADAM_EPS = 3.125e-4

@@ -132,7 +132,7 @@ def make_env(env_id, env_type, seed, noop_max=0):
 ###################################################
 
 def evaluate_policy(env, q_estimator, state_processor,
-                    eval_len, epsilon=0.0, seed=None, noop_max=0):
+                    eval_len, epsilon=0.001, seed=None, noop_max=0, use_noise=False):
 
     state = state_processor.process(env_reset(env, seed=seed, noop_max=noop_max))
 
@@ -146,10 +146,9 @@ def evaluate_policy(env, q_estimator, state_processor,
             action = int(np.random.randint(env.action_space.n))
 
         else:
-            # Evaluation -> no NoisyNet noise
             q = q_estimator.predict(
                 np.expand_dims(state, 0),
-                use_noise=False
+                use_noise=use_noise
             )[0]
 
             action = int(np.argmax(q))

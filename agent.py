@@ -16,7 +16,7 @@ class Estimator:
 
     def __init__(self, input_shape, num_actions, env_type,
                  network_type="dqn", loss_func="mse", noisy=False, num_atoms=51,
-                 v_min=-10.0, v_max=10.0, hidden_layers=1, weight_init="pytorch_default",
+                 v_min=-10.0, v_max=10.0, hidden_layers=1, weight_init="kaiming_uniform",
                  scope="estimator", summaries_dir=None, device=None,
                  adam_lr=0.00025, adam_eps=1e-6):
 
@@ -143,7 +143,7 @@ class Estimator:
         #     s = self.global_step
         #     self.summary_writer.add_scalar("train/loss", loss.item(), s)
 
-        return loss.item()
+        return loss.item(), losses.detach().cpu().numpy()
 
 
 ###################################################
@@ -269,7 +269,7 @@ def make_epsilon_greedy_policy(estimator, num_actions,
     def policy_fn(observation, epsilon):
 
         # Random exploration: skip neural-network inference
-        if not use_noisy_exploration and np.random.random() < epsilon:
+        if np.random.random() < epsilon:
             return int(np.random.randint(num_actions))
 
         # Greedy action selection (with NoisyNet if enabled)
