@@ -1,14 +1,14 @@
 """Plot MinAtar ablations using the reference screenshot's exact color palette.
 
 Run from your project root:
-    python evaluate_reference_style.py
+    python evaluate_million_steps.py
 
 Input for each seed:
-    ./experiments/minatar/setup1/<experiment>/<game>/seed_<N>/evaluation.npz
+    ./experiments/minatar/<setup>/<experiment>/<game>/seed_<N>/evaluation.npz
 with arrays named "frames" and "mean_returns".
 
 The main output is:
-    ./minatar_evaluation/minatar_reference_style.png
+    ./minatar_evaluation/setup2/minatar_reference_style.png
 
 The RGB colors below exactly match Seaborn's 8-color ``husl`` palette,
 in the order shown in the supplied figure. No seaborn dependency required.
@@ -19,19 +19,22 @@ from pathlib import Path
 from statistics import NormalDist
 
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import FuncFormatter, MultipleLocator
 import numpy as np
 
 
 # Order matches the reference figure's legend, NOT filesystem order.
 EXPERIMENTS = {
-    "DQN": Path("./experiments/minatar/setup1/dqn"),
+    # "DQN": Path("./experiments/minatar/setup1/dqn"),
     "Rainbow": Path("./experiments/minatar/setup1/rainbow"),
-    "No Multi-step": Path("./experiments/minatar/setup1/no_nstep"),
+    "Rainbow 2": Path("./experiments/minatar/setup2/rainbow"),
+    "Rainbow 3": Path("./experiments/minatar/setup3/rainbow"),
+    "Rainbow 4": Path("./experiments/minatar/setup4/rainbow"),
+    # "No Multi-step": Path("./experiments/minatar/setup1/no_nstep"),
     # "No Noisy": Path("./experiments/minatar/setup1/no-noisy"),
     # "No Dueling": Path("./experiments/minatar/setup1/no-duel"),
-    "No Double": Path("./experiments/minatar/setup1/no_double"),
-    "No Prioritized": Path("./experiments/minatar/setup1/no_per"),
+    # "No Double": Path("./experiments/minatar/setup1/no_double"),
+    # "No Prioritized": Path("./experiments/minatar/setup1/no_per"),
     # "No Distributional": Path("./experiments/minatar/setup1/no_distrib"),
 }
 
@@ -39,6 +42,9 @@ EXPERIMENTS = {
 COLORS = {
     "DQN": "#F77189",
     "Rainbow": "#CE9032",
+    "Rainbow 2": "#828A1D",
+    "Rainbow 3": "#1D7D8A",
+    "Rainbow 4": "#8A1D85",
     "No Multi-step": "#97A431",
     "No Noisy": "#32B166",
     "No Dueling": "#36ADA4",
@@ -51,6 +57,9 @@ COLORS = {
 MARKERS = {
     "DQN": "o",                # circle
     "Rainbow": "X",            # filled X
+    "Rainbow 2": "X",            # filled X
+    "Rainbow 3": "X",            # filled X
+    "Rainbow 4": "X",            # filled X
     "No Multi-step": "s",     # square
     "No Noisy": "P",           # filled plus
     "No Dueling": "D",         # diamond
@@ -60,22 +69,21 @@ MARKERS = {
 }
 
 GAMES = [
-    "MinAtar_Asterix-v0",
-    "MinAtar_Breakout-v0",
-    "MinAtar_Freeway-v0",
+    # "MinAtar_Asterix-v0",
+    # "MinAtar_Breakout-v0",
+    # "MinAtar_Freeway-v0",
     "MinAtar_Seaquest-v0",
-    "MinAtar_SpaceInvaders-v0",
+#     "MinAtar_SpaceInvaders-v0",
 ]
 
 SEEDS = list(range(10))
-OUTPUT_DIR = Path("./minatar_evaluation")
+OUTPUT_DIR = Path("./minatar_evaluation/setup3")
 CI_LEVEL = 0.90
 SHOW_PLOTS = False
 
-# For the 5-panel figure, show x as evaluation iteration (0, 1, ..., n-1),
-# as in your reference image. The original frames are still used to align seeds.
-# This does NOT resample or alter the observed mean returns.
-USE_ITERATION_AXIS = True
+# Plot data at 1M, 2M, 3M, ... environment steps, regardless of EVAL_EVERY.
+# If a milestone falls between saved evaluations, linearly interpolate returns.
+PLOT_EVERY_STEPS = 1_000_000
 SHOW_GAME_TITLES = False  # screenshot is cropped above the subplot titles
 SAVE_DPI = 200
 
@@ -122,10 +130,10 @@ def mean_normal_ci(scores: np.ndarray):
 
 
 def load_one_curve(root: Path, game: str):
-    """Load all seeds and align evaluations by *environment steps*.
+    """Align every seed on the same 1M, 2M, ... environment-step grid.
 
-    If seeds have differing evaluation steps, interpolate only over the shared
-    steps interval (no extrapolation). The returned frames are still real steps.
+    Values between recorded evaluations are linearly interpolated, never
+    extrapolated.  Only 1M milestones covered by *all* seeds are included.
     """
     seed_curves = []
     for seed in SEEDS:
@@ -146,26 +154,25 @@ def load_one_curve(root: Path, game: str):
             raise ValueError(f"Evaluation frames must be strictly increasing: {path}")
         seed_curves.append((frames, returns))
 
-    reference_frames = seed_curves[0][0]
-    if all(np.array_equal(reference_frames, x) for x, _ in seed_curves[1:]):
-        return reference_frames, np.stack([y for _, y in seed_curves])
-
-    start_step = max(int(x[0]) for x, _ in seed_curves)
-    end_step = min(int(x[-1]) for x, _ in seed_curves)
-    if start_step >= end_step:
-        raise ValueError(f"No overlapping evaluation steps: {root / game}")
-
-    common_frames = reference_frames[
-        (reference_frames >= start_step) & (reference_frames <= end_step)
-    ]
-    if len(common_frames) < 2:
-        common_frames = np.linspace(start_step, end_step, 100)
+    start_step = max(int(frames[0]) for frames, _ in seed_curves)
+    end_step = min(int(frames[-1]) for frames, _ in seed_curves)
+    # Always start at a positive, exact multiple of one million.
+    first_milestone = max(1, (start_step + PLOT_EVERY_STEPS - 1) // PLOT_EVERY_STEPS)
+    last_milestone = end_step // PLOT_EVERY_STEPS
+    if first_milestone > last_milestone:
+        raise ValueError(
+            f"No shared 1M-step checkpoint for {root / game} "
+            f"(all seeds overlap only between {start_step} and {end_step} steps)"
+        )
+    common_frames = np.arange(
+        first_milestone, last_milestone + 1, dtype=np.int64
+    ) * PLOT_EVERY_STEPS
 
     aligned = np.stack([
         np.interp(common_frames, frames, values)
         for frames, values in seed_curves
     ])
-    print(f"[aligned] {root.name}/{game}: interpolated on common step grid")
+    print(f"[aligned] {root.name}/{game}: {len(common_frames)} one-million-step points")
     return common_frames, aligned
 
 
@@ -194,9 +201,14 @@ def load_all_curves(experiments):
 
 
 def x_values(frames):
-    if USE_ITERATION_AXIS:
-        return np.arange(len(frames))
-    return frames
+    """Plot x in millions of environment steps (1.0 means 1M)."""
+    return np.asarray(frames, dtype=np.float64) / PLOT_EVERY_STEPS
+
+
+def style_step_axis(ax):
+    ax.xaxis.set_major_locator(MultipleLocator(1))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{x:g}M"))
+    ax.set_xlabel("Training environment steps")
 
 
 def line_and_band(ax, label, frames, scores, *, show_label=False):
@@ -218,46 +230,53 @@ def line_and_band(ax, label, frames, scores, *, show_label=False):
     return low.min(), high.max()
 
 
-def set_reference_axis_style(ax, game, *, first=False, x_count=None):
+def set_reference_axis_style(ax, game, *, first=False):
     ax.grid(False)
     for spine in ax.spines.values():
         spine.set_linewidth(0.8)
     ax.tick_params(axis="both", labelsize=17, width=0.8, length=4, pad=0)
-    ax.set_xlabel("Iteration" if USE_ITERATION_AXIS else "Training environment steps",
-                  fontsize=25, labelpad=2)
+    ax.tick_params(axis="x", labelsize=10, labelrotation=45)
+    style_step_axis(ax)
+    ax.xaxis.label.set_fontsize(18)
     if first:
         ax.set_ylabel("Return", fontsize=26, labelpad=2)
     if SHOW_GAME_TITLES:
         ax.set_title(short_game_name(game).replace("SpaceInvaders", "Space Invaders"),
                      fontsize=18, pad=12)
-    if USE_ITERATION_AXIS:
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=6))
-        if x_count is not None:
-            ax.set_xlim(-0.45, max(x_count - 1, 1) + 0.45)
 
 
 def plot_reference_grid(curves):
-    """Five side-by-side panels with all ablations; match reference screenshot."""
-    fig, axes = plt.subplots(1, 5, figsize=(18.57, 3.88))
-    # Pixel placement approximates the 1857x388 reference crop at 100 dpi.
-    fig.subplots_adjust(left=0.083, right=0.955, bottom=0.26, top=0.88,
-                        wspace=0.20)
+    """One panel per selected game, with all ablations and 1M-step x-axis."""
+    n_games = len(GAMES)
+    fig_width = 18.57 if n_games == 5 else max(9.0, 3.7 * n_games)
+    fig, axes = plt.subplots(1, n_games, figsize=(fig_width, 3.88), squeeze=False)
+    axes = axes[0]
+    if n_games == 5:
+        fig.subplots_adjust(left=0.083, right=0.955, bottom=0.28, top=0.88,
+                            wspace=0.20)
+    else:
+        fig.subplots_adjust(left=0.11, right=0.96, bottom=0.30, top=0.88,
+                            wspace=0.27)
     labels = list(curves)
+    legend_index = n_games // 2
 
     for j, game in enumerate(GAMES):
         ax = axes[j]
-        lowest, highest, maximum_length = np.inf, -np.inf, 0
+        lowest, highest = np.inf, -np.inf
+        min_step, max_step = np.inf, -np.inf
         for label in labels:
             frames, scores = curves[label][game]
             low, high = line_and_band(
-                ax, label, frames, scores, show_label=(j == 2)
+                ax, label, frames, scores, show_label=(j == legend_index)
             )
             lowest = min(lowest, low)
             highest = max(highest, high)
-            maximum_length = max(maximum_length, len(frames))
+            min_step = min(min_step, frames[0])
+            max_step = max(max_step, frames[-1])
 
-        set_reference_axis_style(ax, game, first=(j == 0),
-                                 x_count=maximum_length)
+        set_reference_axis_style(ax, game, first=(j == 0))
+        ax.set_xlim(min_step / PLOT_EVERY_STEPS - 0.25,
+                    max_step / PLOT_EVERY_STEPS + 0.25)
         ylim = REFERENCE_Y_LIMITS[game]
         if ylim[0] <= lowest and highest <= ylim[1]:
             ax.set_ylim(*ylim)
@@ -267,8 +286,8 @@ def plot_reference_grid(curves):
             print(f"[scale] {short_game_name(game)}: using automatic y-limits "
                   f"because data/CI extend beyond {ylim}.")
 
-    # The reference figure places its sole legend inside the center (Freeway) panel.
-    axes[2].legend(
+    # Keep the reference-style legend in the middle panel, even for one game.
+    axes[legend_index].legend(
         loc="lower right", fontsize=12.0,
         frameon=True, fancybox=False, framealpha=0.93,
         edgecolor="#BBBBBB", facecolor="white",
@@ -293,8 +312,7 @@ def plot_per_environment(curves):
             frames, scores = curves[label][game]
             line_and_band(ax, label, frames, scores, show_label=True)
         ax.set_title(f"{short_game_name(game)} (90% CI)")
-        ax.set_xlabel("Iteration" if USE_ITERATION_AXIS
-                      else "Training environment steps")
+        style_step_axis(ax)
         ax.set_ylabel("Return")
         ax.grid(alpha=0.15)
         ax.legend()
@@ -316,7 +334,8 @@ def plot_per_configuration(curves):
             frames, scores = curves[label][game]
             line_and_band(ax, label, frames, scores)
             ax.set_title(short_game_name(game))
-            ax.set_xlabel("Iteration" if USE_ITERATION_AXIS else "Steps")
+            style_step_axis(ax)
+            ax.tick_params(axis="x", labelrotation=45)
             ax.grid(alpha=0.15)
             if j == 0:
                 ax.set_ylabel("Return")

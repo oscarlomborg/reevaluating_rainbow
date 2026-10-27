@@ -86,7 +86,8 @@ def run_job(job):
             device=device,
         )
         q_estimator = Estimator(
-            **estimator_kwargs, scope="q_estimator", summaries_dir=seed_dir
+            **estimator_kwargs, scope="q_estimator",
+            summaries_dir=seed_dir if cfg.USE_SUMMARY_WRITER else None
         )
         target_estimator = Estimator(
             **estimator_kwargs, scope="target_q"

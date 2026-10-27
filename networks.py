@@ -80,10 +80,10 @@ class ConvFeatureExtractor(nn.Module):
         channels, height, width = input_shape
 
         if env_type == "minatar":
-            self.conv1 = nn.Conv2d(channels, 16, 3, stride=1)
+            self.conv1 = nn.Conv2d(channels, 16, 3, stride=1, padding=1) #TODO remove padding
 
-            conv_h = height - 2
-            conv_w = width - 2
+            conv_h = height #- 2 TODO remove padding
+            conv_w = width #- 2 TODO remove padding
 
             self.feature_dim = 16 * conv_h * conv_w
 
@@ -367,3 +367,16 @@ def build_network(input_shape, num_actions, env_type, network_type="dqn",
     model.apply(lambda m: init_weights(m, init_type=weight_init))
 
     return model
+
+model = build_network(
+    input_shape=(10, 10, 10),
+    num_actions=6,
+    env_type="minatar",
+    network_type="distributional_dueling",
+    noisy=True,
+    num_atoms=51,
+    hidden_layers=0,
+    weight_init="xavier_uniform",
+)
+
+print(sum(p.numel() for p in model.parameters()))

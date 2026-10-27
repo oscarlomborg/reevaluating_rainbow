@@ -25,7 +25,7 @@ REQUIRED_CONFIG = (
     "EPSILON_START", "EPSILON_END", "EPSILON_DECAY_STEPS",
     "EVAL_EVERY", "EVAL_LEN", "NOOP_MAX",
     "ADAM_LR", "ADAM_EPS", "V_MIN", "V_MAX", "LOSS_FUNC", "WEIGHT_INIT",
-    "HIDDEN_LAYERS", "CLIP_REWARDS"
+    "HIDDEN_LAYERS", "CLIP_REWARDS", "USE_SUMMARY_WRITER"
 )
 
 def build_config(env_type, setup_name, ablation_name):
@@ -88,8 +88,11 @@ def validate_config(cfg):
         raise ValueError("ADAM_LR must be positive.")
     if cfg.ADAM_EPS <= 0:
         raise ValueError("ADAM_EPS must be positive.")
+    
     if not isinstance(cfg.CLIP_REWARDS, bool):
         raise ValueError("CLIP_REWARDS must be a boolean.")
+    if not isinstance(cfg.USE_SUMMARY_WRITER, bool):
+        raise ValueError("USE_SUMMARY_WRITER must be a boolean.")
 
     # C51 requires an ordered support with at least two atoms.
     if "distributional" in cfg.NETWORK_TYPE:
