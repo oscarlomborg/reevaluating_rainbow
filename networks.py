@@ -80,10 +80,10 @@ class ConvFeatureExtractor(nn.Module):
         channels, height, width = input_shape
 
         if env_type == "minatar":
-            self.conv1 = nn.Conv2d(channels, 16, 3, stride=1, padding=1) #TODO remove padding
+            self.conv1 = nn.Conv2d(channels, 16, 3, stride=1, padding=1) # TO remove padding
 
-            conv_h = height #- 2 TODO remove padding
-            conv_w = width #- 2 TODO remove padding
+            conv_h = height #- 2 To remove padding
+            conv_w = width #- 2 To remove padding
 
             self.feature_dim = 16 * conv_h * conv_w
 
