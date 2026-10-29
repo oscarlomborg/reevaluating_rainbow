@@ -25,59 +25,62 @@ import numpy as np
 
 # Order matches the reference figure's legend, NOT filesystem order.
 EXPERIMENTS = {
-    # "DQN": Path("./experiments/minatar/setup1/dqn"),
+    "DQN": Path("./experiments/minatar/setup1/dqn"),
     "Rainbow": Path("./experiments/minatar/setup1/rainbow"),
-    "Rainbow 2": Path("./experiments/minatar/setup2/rainbow"),
-    "Rainbow 3": Path("./experiments/minatar/setup3/rainbow"),
-    "Rainbow 4": Path("./experiments/minatar/setup4/rainbow"),
-    # "No Multi-step": Path("./experiments/minatar/setup1/no_nstep"),
-    # "No Noisy": Path("./experiments/minatar/setup1/no-noisy"),
-    # "No Dueling": Path("./experiments/minatar/setup1/no-duel"),
-    # "No Double": Path("./experiments/minatar/setup1/no_double"),
-    # "No Prioritized": Path("./experiments/minatar/setup1/no_per"),
-    # "No Distributional": Path("./experiments/minatar/setup1/no_distrib"),
+    # "Rainbow new": Path("./experiments/minatar/setup3/rainbow"),
+    "No Multi-step": Path("./experiments/minatar/setup1/no_nstep"),
+    "No Noisy": Path("./experiments/minatar/setup1/no-noisy"),
+    "No Dueling": Path("./experiments/minatar/setup1/no-duel"),
+    "No Double": Path("./experiments/minatar/setup1/no_double"),
+    "No Prioritized": Path("./experiments/minatar/setup1/no_per"),
+    "No Distributional": Path("./experiments/minatar/setup1/no_distrib"),
+    # "DQN DOPA": Path("./experiments/minatar/dopamine/dqn"),
+    # "No Distributional DOPA": Path("./experiments/minatar/dopamine/no_distrib"),
+    # "Rainbow DOPA": Path("./experiments/minatar/dopamine/rainbow"),
 }
 
 # EXACT Seaborn color_palette('husl', 8) colors (RGB rounded to 8-bit).
 COLORS = {
     "DQN": "#F77189",
+    "DQN DOPA": "#F77189",
     "Rainbow": "#CE9032",
-    "Rainbow 2": "#828A1D",
-    "Rainbow 3": "#1D7D8A",
-    "Rainbow 4": "#8A1D85",
+    "Rainbow new": "#1D7D8A",
+    "Rainbow DOPA": "#1D7D8A",
     "No Multi-step": "#97A431",
     "No Noisy": "#32B166",
     "No Dueling": "#36ADA4",
     "No Double": "#39A7D0",
     "No Prioritized": "#A48CF4",
     "No Distributional": "#F561DD",
+    "No Distributional DOPA": "#F561DD",
 }
 
 # Match the marker family in the reference figure.
 MARKERS = {
     "DQN": "o",                # circle
+    "DQN DOPA": "D",                # circle
     "Rainbow": "X",            # filled X
-    "Rainbow 2": "X",            # filled X
-    "Rainbow 3": "X",            # filled X
-    "Rainbow 4": "X",            # filled X
+    "Rainbow new": "X",            # filled X
+    "Rainbow DOPA": "^",            # filled X
     "No Multi-step": "s",     # square
     "No Noisy": "P",           # filled plus
     "No Dueling": "D",         # diamond
     "No Double": "d",          # thin diamond
     "No Prioritized": "^",     # upward triangle
     "No Distributional": "x",  # thin x
+    "No Distributional DOPA": "s",  # thin x
 }
 
 GAMES = [
-    # "MinAtar_Asterix-v0",
-    # "MinAtar_Breakout-v0",
-    # "MinAtar_Freeway-v0",
+    "MinAtar_Asterix-v0",
+    "MinAtar_Breakout-v0",
+    "MinAtar_Freeway-v0",
     "MinAtar_Seaquest-v0",
-#     "MinAtar_SpaceInvaders-v0",
+    "MinAtar_SpaceInvaders-v0",
 ]
 
 SEEDS = list(range(10))
-OUTPUT_DIR = Path("./minatar_evaluation/setup3")
+OUTPUT_DIR = Path("./minatar_evaluation/setup1")
 CI_LEVEL = 0.90
 SHOW_PLOTS = False
 

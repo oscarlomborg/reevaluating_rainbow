@@ -367,16 +367,3 @@ def build_network(input_shape, num_actions, env_type, network_type="dqn",
     model.apply(lambda m: init_weights(m, init_type=weight_init))
 
     return model
-
-model = build_network(
-    input_shape=(10, 10, 10),
-    num_actions=6,
-    env_type="minatar",
-    network_type="distributional_dueling",
-    noisy=True,
-    num_atoms=51,
-    hidden_layers=0,
-    weight_init="xavier_uniform",
-)
-
-print(sum(p.numel() for p in model.parameters()))
