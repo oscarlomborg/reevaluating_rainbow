@@ -57,6 +57,6 @@ WEIGHT_INIT = "xavier_uniform" # "kaiming_uniform" or "xavier_uniform"
 ADAM_LR = 2.5e-4
 ADAM_EPS = 3.125e-4
 
-CLIP_REWARDS = False
+CLIP_REWARDS = True
 
 USE_SUMMARY_WRITER = False
