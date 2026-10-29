@@ -8,6 +8,7 @@ __pycache__/
 # Generated experiment output
 experiments/*
 logs/*
+minatar_evaluation/*
 
 # Generated plots
 *.png

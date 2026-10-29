@@ -1,364 +1,302 @@
-"""Plot MinAtar ablations using the reference screenshot's exact color palette.
+"""Plot MinAtar experiment learning curves and final-return boxplots from a CSV.
 
-Run from your project root:
-    python evaluate_million_steps.py
+Required CSV columns:
+    env_type,setup,experiment,environment,seed,frame,mean_return
 
-Input for each seed:
-    ./experiments/minatar/<setup>/<experiment>/<game>/seed_<N>/evaluation.npz
-with arrays named "frames" and "mean_returns".
+Examples:
+    python evaluate.py --csv experiments/minatar/setup1/mean_returns.csv
+    python evaluate.py --csv combined_mean_returns.csv --output minatar_evaluation
+    python evaluate.py --csv combined_mean_returns.csv --setup setup1
 
-The main output is:
-    ./minatar_evaluation/setup2/minatar_reference_style.png
-
-The RGB colors below exactly match Seaborn's 8-color ``husl`` palette,
-in the order shown in the supplied figure. No seaborn dependency required.
+Outputs include a learning curve and final boxplot for each environment,
+plus a combined learning-curve grid and a final performance summary CSV.
+Each final boxplot compares seeds at the last evaluation frame SHARED by
+all selected experiment/seed combinations within that environment.
 """
 from __future__ import annotations
 
+import argparse
+import csv
+import re
+from collections import defaultdict
 from pathlib import Path
 from statistics import NormalDist
 
+import matplotlib
+matplotlib.use("Agg")  # Safe for scripts on headless servers and HPC clusters.
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter, MultipleLocator
+from matplotlib.lines import Line2D
+from matplotlib.ticker import FuncFormatter
+from matplotlib.patches import Patch
 import numpy as np
 
-
-# Order matches the reference figure's legend, NOT filesystem order.
-EXPERIMENTS = {
-    "DQN": Path("./experiments/minatar/setup1/dqn"),
-    "Rainbow": Path("./experiments/minatar/setup1/rainbow"),
-    # "Rainbow new": Path("./experiments/minatar/setup3/rainbow"),
-    "No Multi-step": Path("./experiments/minatar/setup1/no_nstep"),
-    "No Noisy": Path("./experiments/minatar/setup1/no-noisy"),
-    "No Dueling": Path("./experiments/minatar/setup1/no-duel"),
-    "No Double": Path("./experiments/minatar/setup1/no_double"),
-    "No Prioritized": Path("./experiments/minatar/setup1/no_per"),
-    "No Distributional": Path("./experiments/minatar/setup1/no_distrib"),
-    # "DQN DOPA": Path("./experiments/minatar/dopamine/dqn"),
-    # "No Distributional DOPA": Path("./experiments/minatar/dopamine/no_distrib"),
-    # "Rainbow DOPA": Path("./experiments/minatar/dopamine/rainbow"),
+REQUIRED_COLUMNS = {
+    "env_type", "setup", "experiment", "environment", "seed", "frame", "mean_return"
 }
 
-# EXACT Seaborn color_palette('husl', 8) colors (RGB rounded to 8-bit).
+# Matches the palette used by your previous evaluate.py.
 COLORS = {
-    "DQN": "#F77189",
-    "DQN DOPA": "#F77189",
-    "Rainbow": "#CE9032",
-    "Rainbow new": "#1D7D8A",
-    "Rainbow DOPA": "#1D7D8A",
-    "No Multi-step": "#97A431",
-    "No Noisy": "#32B166",
-    "No Dueling": "#36ADA4",
-    "No Double": "#39A7D0",
-    "No Prioritized": "#A48CF4",
-    "No Distributional": "#F561DD",
-    "No Distributional DOPA": "#F561DD",
+    "dqn": "#F77189", "rainbow": "#CE9032",
+    "no_nstep": "#97A431", "no_noisy": "#32B166",
+    "no_dueling": "#36ADA4", "no_double": "#39A7D0",
+    "no_per": "#A48CF4", "no_distrib": "#F561DD",
 }
-
-# Match the marker family in the reference figure.
-MARKERS = {
-    "DQN": "o",                # circle
-    "DQN DOPA": "D",                # circle
-    "Rainbow": "X",            # filled X
-    "Rainbow new": "X",            # filled X
-    "Rainbow DOPA": "^",            # filled X
-    "No Multi-step": "s",     # square
-    "No Noisy": "P",           # filled plus
-    "No Dueling": "D",         # diamond
-    "No Double": "d",          # thin diamond
-    "No Prioritized": "^",     # upward triangle
-    "No Distributional": "x",  # thin x
-    "No Distributional DOPA": "s",  # thin x
+LABELS = {
+    "dqn": "DQN", "rainbow": "Rainbow",
+    "no_nstep": "No Multi-step", "no_noisy": "No Noisy",
+    "no_dueling": "No Dueling", "no_double": "No Double",
+    "no_per": "No Prioritized", "no_distrib": "No Distributional",
 }
-
-GAMES = [
-    "MinAtar_Asterix-v0",
-    "MinAtar_Breakout-v0",
-    "MinAtar_Freeway-v0",
-    "MinAtar_Seaquest-v0",
-    "MinAtar_SpaceInvaders-v0",
-]
-
-SEEDS = list(range(10))
-OUTPUT_DIR = Path("./minatar_evaluation/setup1")
-CI_LEVEL = 0.90
-SHOW_PLOTS = False
-
-# Plot data at 1M, 2M, 3M, ... environment steps, regardless of EVAL_EVERY.
-# If a milestone falls between saved evaluations, linearly interpolate returns.
-PLOT_EVERY_STEPS = 1_000_000
-SHOW_GAME_TITLES = False  # screenshot is cropped above the subplot titles
-SAVE_DPI = 200
-
-# These reproduce the approximate panel ranges visible in the screenshot.
-# They are applied only when *all* observed means and CIs fit, to avoid
-# inadvertently cutting off your own experiment results.
-REFERENCE_Y_LIMITS = {
-    "MinAtar_Asterix-v0": (-1.0, 54.0),
-    "MinAtar_Breakout-v0": (0.0, 14.5),
-    "MinAtar_Freeway-v0": (16.5, 62.5),
-    "MinAtar_Seaquest-v0": (-1.0, 36.0),
-    "MinAtar_SpaceInvaders-v0": (12.0, 107.0),
-}
-REFERENCE_Y_TICKS = {
-    "MinAtar_Asterix-v0": np.arange(0, 51, 10),
-    "MinAtar_Breakout-v0": np.arange(4, 15, 2),
-    "MinAtar_Freeway-v0": np.arange(20, 61, 10),
-    "MinAtar_Seaquest-v0": np.arange(5, 36, 5),
-    "MinAtar_SpaceInvaders-v0": np.arange(20, 101, 20),
-}
-
-CI_Z = NormalDist().inv_cdf((1.0 + CI_LEVEL) / 2.0)
+MARKERS = ["o", "X", "s", "P", "D", "d", "^", "x", "v", "h"]
+CI_Z = NormalDist().inv_cdf(0.95)  # two-sided normal 90% CI
 
 
-def safe_name(value: str) -> str:
-    return (value.replace("/", "_").replace("\\", "_")
-            .replace(" ", "_").replace(":", "_"))
+def safe_name(s):
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", s).strip("_")
 
 
-def short_game_name(game: str) -> str:
-    return game.replace("MinAtar_", "").replace("-v0", "")
+def pretty_game(name):
+    return name.replace("MinAtar_", "").replace("-v0", "").replace("-v1", "")
 
 
-def mean_normal_ci(scores: np.ndarray):
-    """Pointwise, two-sided 90% normal-approximation CI across seeds."""
-    scores = np.asarray(scores, dtype=np.float64)
-    n = scores.shape[0]
-    if n < 2:
-        raise ValueError("At least two seeds are required for a confidence interval.")
-    mean = np.mean(scores, axis=0)
-    sd = np.std(scores, axis=0, ddof=1)
-    margin = CI_Z * sd / np.sqrt(n)
-    return mean, mean - margin, mean + margin
+def read_csv(path, env_type=None, setups=None):
+    # data[(env_type, setup, experiment, environment)][seed][frame] = score
+    data = defaultdict(lambda: defaultdict(dict))
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        missing = REQUIRED_COLUMNS - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"CSV missing columns: {', '.join(sorted(missing))}")
+        for lineno, row in enumerate(reader, 2):
+            try:
+                kind = row["env_type"].strip()
+                setup = row["setup"].strip()
+                if env_type and kind != env_type:
+                    continue
+                if setups and setup not in setups:
+                    continue
+                experiment = row["experiment"].strip()
+                game = row["environment"].strip()
+                seed = int(row["seed"])
+                frame = int(row["frame"])
+                score = float(row["mean_return"])
+                if not all((kind, setup, experiment, game)) or frame < 0 or not np.isfinite(score):
+                    raise ValueError("empty category, negative frame or non-finite score")
+                key = (kind, setup, experiment, game)
+                if frame in data[key][seed]:
+                    raise ValueError(f"duplicate result for {key}, seed={seed}, frame={frame}")
+                data[key][seed][frame] = score
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Invalid CSV row {lineno}: {e}") from e
+    if not data:
+        raise ValueError("No evaluation rows found for the selected filters")
+    return data
 
 
-def load_one_curve(root: Path, game: str):
-    """Align every seed on the same 1M, 2M, ... environment-step grid.
-
-    Values between recorded evaluations are linearly interpolated, never
-    extrapolated.  Only 1M milestones covered by *all* seeds are included.
-    """
-    seed_curves = []
-    for seed in SEEDS:
-        path = root / game / f"seed_{seed}" / "evaluation.npz"
-        if not path.is_file():
-            raise FileNotFoundError(f"Missing evaluation file: {path.resolve()}")
-
-        with np.load(path, allow_pickle=False) as data:
-            frames = np.asarray(data["frames"], dtype=np.int64)
-            returns = np.asarray(data["mean_returns"], dtype=np.float64)
-
-        if (frames.ndim != 1 or returns.ndim != 1
-                or not len(frames) or frames.shape != returns.shape):
-            raise ValueError(f"Invalid evaluation arrays in {path}")
-        if not np.isfinite(returns).all():
-            raise ValueError(f"Non-finite evaluation return in {path}")
-        if len(frames) > 1 and not np.all(np.diff(frames) > 0):
-            raise ValueError(f"Evaluation frames must be strictly increasing: {path}")
-        seed_curves.append((frames, returns))
-
-    start_step = max(int(frames[0]) for frames, _ in seed_curves)
-    end_step = min(int(frames[-1]) for frames, _ in seed_curves)
-    # Always start at a positive, exact multiple of one million.
-    first_milestone = max(1, (start_step + PLOT_EVERY_STEPS - 1) // PLOT_EVERY_STEPS)
-    last_milestone = end_step // PLOT_EVERY_STEPS
-    if first_milestone > last_milestone:
-        raise ValueError(
-            f"No shared 1M-step checkpoint for {root / game} "
-            f"(all seeds overlap only between {start_step} and {end_step} steps)"
-        )
-    common_frames = np.arange(
-        first_milestone, last_milestone + 1, dtype=np.int64
-    ) * PLOT_EVERY_STEPS
-
-    aligned = np.stack([
-        np.interp(common_frames, frames, values)
-        for frames, values in seed_curves
-    ])
-    print(f"[aligned] {root.name}/{game}: {len(common_frames)} one-million-step points")
-    return common_frames, aligned
+def experiment_label(key, duplicated_names):
+    _, setup, experiment, _ = key
+    name = LABELS.get(experiment, experiment.replace("_", " ").title())
+    return f"{name} ({setup})" if experiment in duplicated_names else name
 
 
-def available_experiments():
-    """Skip entirely absent ablations but flag incomplete experiment results."""
-    found = {}
-    for label, root in EXPERIMENTS.items():
-        first = root / GAMES[0] / f"seed_{SEEDS[0]}" / "evaluation.npz"
-        if first.is_file():
-            found[label] = root
-        else:
-            print(f"[skip] {label}: {first} does not exist")
-    if not found:
-        raise FileNotFoundError(
-            "No evaluation data found. Check the EXPERIMENTS paths. "
-            "Expected evaluation.npz for each experiment/game/seed."
-        )
-    return found
+def group_by_environment(data):
+    grouped = defaultdict(dict)
+    for key, seeds in data.items():
+        grouped[(key[0], key[3])][key] = seeds
+    return dict(sorted(grouped.items()))
 
 
-def load_all_curves(experiments):
-    return {
-        label: {game: load_one_curve(root, game) for game in GAMES}
-        for label, root in experiments.items()
-    }
+def palette_for(keys):
+    extras = plt.get_cmap("tab20")
+    unknown = sorted({key[2] for key in keys if key[2] not in COLORS})
+    extra_colors = {name: extras(i % 20) for i, name in enumerate(unknown)}
+    return {key: COLORS.get(key[2], extra_colors.get(key[2])) for key in keys}
 
 
-def x_values(frames):
-    """Plot x in millions of environment steps (1.0 means 1M)."""
-    return np.asarray(frames, dtype=np.float64) / PLOT_EVERY_STEPS
+def add_learning_curves(ax, models, color_map):
+    names = [key[2] for key in models]
+    duplicated_names = {n for n in names if names.count(n) > 1}
+    for idx, (key, seeds) in enumerate(sorted(models.items())):
+        # Plot only the shared, observed frame range. No extrapolation.
+        first = max(min(values) for values in seeds.values())
+        last = min(max(values) for values in seeds.values())
+        if first > last:
+            print(f"[skip curve] {key}: seed evaluation ranges do not overlap")
+            continue
+        frames = sorted({frame for values in seeds.values() for frame in values if first <= frame <= last})
+        if not frames:
+            continue
+        xframes = np.array(frames, dtype=np.float64)
+        scores = np.array([
+            np.interp(xframes, sorted(values), [values[f] for f in sorted(values)])
+            for _, values in sorted(seeds.items())
+        ])
+        mean = scores.mean(axis=0)
+        label = experiment_label(key, duplicated_names)
+        color = color_map[key]
+        if len(seeds) >= 2:
+            se = scores.std(axis=0, ddof=1) / np.sqrt(len(seeds))
+            ax.fill_between(xframes / 1e6, mean - CI_Z * se, mean + CI_Z * se,
+                            color=color, alpha=0.16, linewidth=0)
+        ax.plot(xframes / 1e6, mean, label=f"{label} (n={len(seeds)})",
+                color=color, lw=1.8, marker=MARKERS[idx % len(MARKERS)],
+                ms=4.5)
+    ax.set_xlabel("Training steps (millions)")
+    ax.set_ylabel("Mean evaluation return")
+    ax.grid(alpha=0.18)
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:g}M"))
 
 
-def style_step_axis(ax):
-    ax.xaxis.set_major_locator(MultipleLocator(1))
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{x:g}M"))
-    ax.set_xlabel("Training environment steps")
+def final_common_frame(models):
+    """Latest frame that appears for every model AND every seed."""
+    common = None
+    for seeds in models.values():
+        for values in seeds.values():
+            frames = set(values)
+            common = frames if common is None else common & frames
+    return max(common) if common else None
 
 
-def line_and_band(ax, label, frames, scores, *, show_label=False):
-    mean, low, high = mean_normal_ci(scores)
-    x = x_values(frames)
-    color = COLORS[label]
-    ax.fill_between(x, low, high, color=color, alpha=0.18, linewidth=0, zorder=1)
-    ax.plot(
-        x, mean,
-        color=color,
-        linewidth=1.55,
-        marker=MARKERS[label],
-        markersize=4.8,
-        markeredgecolor="white",
-        markeredgewidth=0.5,
-        label=label if show_label else None,
-        zorder=2,
+def add_final_boxplots(ax, models, color_map, frame):
+    keys = sorted(models)
+    names = [key[2] for key in keys]
+    duplicated_names = {n for n in names if names.count(n) > 1}
+    groups = []
+    labels = []
+    for key in keys:
+        vals = np.asarray([v[frame] for _, v in sorted(models[key].items())], dtype=float)
+        groups.append(vals)
+        labels.append(experiment_label(key, duplicated_names))
+    positions = np.arange(1, len(groups) + 1)
+    bp = ax.boxplot(groups, positions=positions, widths=0.57, patch_artist=True, whis=1.5,
+                    showfliers=False, medianprops={"color": "#232323", "linewidth": 1.7},
+                    showmeans=True,      # Show mean
+                    meanline=True,        # Mean as horizontal line
+                    meanprops={"color": "red", "linestyle": "--","linewidth": 2,},
+                    boxprops={"linewidth": 1.0},
+                    whiskerprops={"linewidth": 1.0},
+                    capprops={"linewidth": 1.0})
+
+    legend_elements = [
+        Line2D([0], [0], color="red", linestyle="--",
+            linewidth=2, label="Mean"),
+        Line2D([0], [0], color="black", linestyle="-",
+            linewidth=2, label="Median"),
+        Patch(facecolor="lightgray", edgecolor="black",
+            alpha=0.5, label="IQR (25-75%)"),
+        Line2D([0], [0], color="black", linestyle="-",
+           linewidth=1.5, marker="|", markersize=10,
+           label="Tukey fences (1.5 x IQR)"),
+        Line2D([0], [0], color="black", marker="o",
+            linestyle="None", markersize=5,
+            label="Individual seeds"),
+    ]
+
+    ax.legend(
+        handles=legend_elements,
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1),
+        fontsize=10,
+        frameon=True,
     )
-    return low.min(), high.max()
+
+    
+    for i, (patch, key, values) in enumerate(zip(bp["boxes"], keys, groups)):
+        patch.set_facecolor(color_map[key])
+        patch.set_alpha(0.48)
+        # Fixed random seed for repeatable point jitter.
+        rng = np.random.default_rng(100 + i)
+        jitter = rng.uniform(-0.15, 0.15, size=len(values))
+        ax.scatter(positions[i] + jitter, values, s=29, c=[color_map[key]],
+                   edgecolor="#333333", linewidth=0.5, alpha=0.9, zorder=3)
+    ax.set_xticks(positions, labels=labels, rotation=35, ha="right")
+    ax.set_ylabel("Final mean evaluation return")
+    ax.set_xlabel("Configuration")
+    ax.set_title(f"Final evaluation at {frame:,} training steps")
+    ax.grid(axis="y", alpha=0.2)
+    ax.set_axisbelow(True)
+    return keys, groups
 
 
-def set_reference_axis_style(ax, game, *, first=False):
-    ax.grid(False)
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.8)
-    ax.tick_params(axis="both", labelsize=17, width=0.8, length=4, pad=0)
-    ax.tick_params(axis="x", labelsize=10, labelrotation=45)
-    style_step_axis(ax)
-    ax.xaxis.label.set_fontsize(18)
-    if first:
-        ax.set_ylabel("Return", fontsize=26, labelpad=2)
-    if SHOW_GAME_TITLES:
-        ax.set_title(short_game_name(game).replace("SpaceInvaders", "Space Invaders"),
-                     fontsize=18, pad=12)
-
-
-def plot_reference_grid(curves):
-    """One panel per selected game, with all ablations and 1M-step x-axis."""
-    n_games = len(GAMES)
-    fig_width = 18.57 if n_games == 5 else max(9.0, 3.7 * n_games)
-    fig, axes = plt.subplots(1, n_games, figsize=(fig_width, 3.88), squeeze=False)
-    axes = axes[0]
-    if n_games == 5:
-        fig.subplots_adjust(left=0.083, right=0.955, bottom=0.28, top=0.88,
-                            wspace=0.20)
-    else:
-        fig.subplots_adjust(left=0.11, right=0.96, bottom=0.30, top=0.88,
-                            wspace=0.27)
-    labels = list(curves)
-    legend_index = n_games // 2
-
-    for j, game in enumerate(GAMES):
-        ax = axes[j]
-        lowest, highest = np.inf, -np.inf
-        min_step, max_step = np.inf, -np.inf
-        for label in labels:
-            frames, scores = curves[label][game]
-            low, high = line_and_band(
-                ax, label, frames, scores, show_label=(j == legend_index)
-            )
-            lowest = min(lowest, low)
-            highest = max(highest, high)
-            min_step = min(min_step, frames[0])
-            max_step = max(max_step, frames[-1])
-
-        set_reference_axis_style(ax, game, first=(j == 0))
-        ax.set_xlim(min_step / PLOT_EVERY_STEPS - 0.25,
-                    max_step / PLOT_EVERY_STEPS + 0.25)
-        ylim = REFERENCE_Y_LIMITS[game]
-        if ylim[0] <= lowest and highest <= ylim[1]:
-            ax.set_ylim(*ylim)
-            ax.set_yticks(REFERENCE_Y_TICKS[game])
-        else:
-            ax.margins(y=0.06)
-            print(f"[scale] {short_game_name(game)}: using automatic y-limits "
-                  f"because data/CI extend beyond {ylim}.")
-
-    # Keep the reference-style legend in the middle panel, even for one game.
-    axes[legend_index].legend(
-        loc="lower right", fontsize=12.0,
-        frameon=True, fancybox=False, framealpha=0.93,
-        edgecolor="#BBBBBB", facecolor="white",
-        labelspacing=0.40, handlelength=2.1,
-        borderpad=0.35, borderaxespad=0.38,
-    )
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    destination = OUTPUT_DIR / "minatar_reference_style.png"
-    fig.savefig(destination, dpi=SAVE_DPI, facecolor="white")
-    print(f"Saved {destination}")
-    if not SHOW_PLOTS:
-        plt.close(fig)
-
-
-def plot_per_environment(curves):
-    """One plot for each game, using precisely the same color/marker mapping."""
-    out_dir = OUTPUT_DIR / "learning_curves_by_environment"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for game in GAMES:
-        fig, ax = plt.subplots(figsize=(9, 5))
-        for label in curves:
-            frames, scores = curves[label][game]
-            line_and_band(ax, label, frames, scores, show_label=True)
-        ax.set_title(f"{short_game_name(game)} (90% CI)")
-        style_step_axis(ax)
-        ax.set_ylabel("Return")
-        ax.grid(alpha=0.15)
-        ax.legend()
-        fig.tight_layout()
-        fig.savefig(out_dir / f"{safe_name(game)}_mean_ci90.png", dpi=SAVE_DPI)
-        if not SHOW_PLOTS:
-            plt.close(fig)
-
-
-def plot_per_configuration(curves):
-    """Original one-image-per-configuration output, with fixed scheme."""
-    out_dir = OUTPUT_DIR / "learning_curves_by_configuration"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for label in curves:
-        fig, axes = plt.subplots(1, len(GAMES), figsize=(4.1 * len(GAMES), 4.2),
-                                 squeeze=False)
-        for j, game in enumerate(GAMES):
-            ax = axes[0, j]
-            frames, scores = curves[label][game]
-            line_and_band(ax, label, frames, scores)
-            ax.set_title(short_game_name(game))
-            style_step_axis(ax)
-            ax.tick_params(axis="x", labelrotation=45)
-            ax.grid(alpha=0.15)
-            if j == 0:
-                ax.set_ylabel("Return")
-        fig.suptitle(f"{label}: mean evaluation return with 90% CI")
-        fig.tight_layout()
-        fig.savefig(out_dir / f"{safe_name(label)}_all_games.png", dpi=SAVE_DPI)
-        if not SHOW_PLOTS:
-            plt.close(fig)
+def save_plot(fig, destination, dpi):
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(destination, dpi=dpi, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    print(f"[saved] {destination}")
 
 
 def main():
-    experiments = available_experiments()
-    print("Loading evaluation results...")
-    curves = load_all_curves(experiments)
-    plot_reference_grid(curves)
-    plot_per_environment(curves)
-    plot_per_configuration(curves)
-    if SHOW_PLOTS:
-        plt.show()
-    print(f"Done. Outputs: {OUTPUT_DIR.resolve()}")
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--csv", type=Path, default=Path("experiments/minatar/setup1/mean_returns.csv"),
+                        help="Input CSV exported by to_csv.py")
+    parser.add_argument("--output", type=Path, default=Path("minatar_evaluation/setup1"),
+                        help="Directory for output plots and summary")
+    parser.add_argument("--env-type", default=None, help="Optional filter, e.g. minatar")
+    parser.add_argument("--setup", action="append", default=None,
+                        help="Filter one or more setups; may be repeated")
+    parser.add_argument("--dpi", type=int, default=200)
+    args = parser.parse_args()
+
+    data = read_csv(args.csv, env_type=args.env_type, setups=set(args.setup or []))
+    by_game = group_by_environment(data)
+    colors = palette_for(data)
+    args.output.mkdir(parents=True, exist_ok=True)
+    all_summaries = []
+    grid_items = []
+
+    for (kind, game), models in by_game.items():
+        stem = safe_name(f"{kind}_{game}")
+        title = f"{pretty_game(game)} ({kind})"
+
+        fig, ax = plt.subplots(figsize=(10, 5.5))
+        add_learning_curves(ax, models, colors)
+        ax.set_title(f"{title}: mean return across seeds (90% CI)")
+        ax.legend(fontsize=8, ncol=2)
+        save_plot(fig, args.output / "learning_curves" / f"{stem}.png", args.dpi)
+
+        frame = final_common_frame(models)
+        if frame is None:
+            print(f"[skip final] {title}: no evaluation frame shared by all seeds/experiments")
+            continue
+        fig, ax = plt.subplots(figsize=(max(8, 1.45 * len(models)), 6))
+        keys, groups = add_final_boxplots(ax, models, colors, frame)
+        fig.suptitle(title, fontsize=14)
+        save_plot(fig, args.output / "final_boxplots" / f"{stem}.png", args.dpi)
+        for key, values in zip(keys, groups):
+            all_summaries.append({
+                "env_type": kind, "setup": key[1], "experiment": key[2],
+                "environment": game, "frame": frame, "n_seeds": len(values),
+                "mean": float(values.mean()), "std": float(values.std(ddof=1)) if len(values) > 1 else "",
+                "median": float(np.median(values)),
+            })
+        grid_items.append(((kind, game), models))
+
+    # Optional at-a-glance reference-style panel plot for all environments.
+    if by_game:
+        n = len(by_game)
+        fig, axes = plt.subplots(1, n, figsize=(max(7.5, n * 4.2), 4.4), squeeze=False)
+        for j, ((kind, game), models) in enumerate(by_game.items()):
+            ax = axes[0, j]
+            add_learning_curves(ax, models, colors)
+            ax.set_title(pretty_game(game))
+            ax.set_xlabel("Steps (millions)")
+            if j != 0:
+                ax.set_ylabel("")
+            ax.tick_params(axis="both", labelsize=8)
+        handles, labels = axes[0, 0].get_legend_handles_labels()
+        if handles:
+            fig.legend(handles, labels, loc="lower center", ncol=min(4, len(labels)), fontsize=9)
+        fig.tight_layout(rect=(0, 0.12 if handles else 0, 1, 1))
+        save_plot(fig, args.output / "learning_curves_all_environments.png", args.dpi)
+
+    if all_summaries:
+        path = args.output / "final_summary.csv"
+        with path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(all_summaries[0]))
+            writer.writeheader()
+            writer.writerows(all_summaries)
+        print(f"[saved] {path}")
+    print(f"Done: {len(data)} experiment/environment combinations, {len(by_game)} environments")
 
 
 if __name__ == "__main__":
