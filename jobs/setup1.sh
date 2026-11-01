@@ -5,14 +5,14 @@
 # Maximum 10 array jobs running simultaneously
 # Each array job runs 10 seeds in parallel
 
-#BSUB -J "minatar_setup1[1-40]%10"
+#BSUB -J "minatar_setup1[3,4,12,13,18,23,25,29]%10"
 
 #BSUB -q hpc
 #BSUB -n 10
-#BSUB -W 40:00
+#BSUB -W 50:00
 #BSUB -R "select[model==XeonGold6226R]"
 #BSUB -R "span[hosts=1]"
-#BSUB -R "rusage[mem=2GB]"
+#BSUB -R "rusage[mem=3GB]"
 
 #BSUB -o logs/minatar_setup1_%J_%I.out
 #BSUB -e logs/minatar_setup1_%J_%I.err
