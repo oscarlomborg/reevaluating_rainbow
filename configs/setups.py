@@ -1,4 +1,10 @@
 SETUPS = {
+    "base": {
+            "LOSS_FUNC": "huber",
+            "HIDDEN_LAYERS": 0,
+            "WEIGHT_INIT": "xavier_uniform",
+    },
+    
     "setup1": {
         "LOSS_FUNC": "huber",
         "HIDDEN_LAYERS": 0,
