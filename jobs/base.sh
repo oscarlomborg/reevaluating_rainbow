@@ -9,10 +9,10 @@
 
 #BSUB -q hpc
 #BSUB -n 10
-#BSUB -W 40:00
+#BSUB -W 50:00
 #BSUB -R "select[model==XeonGold6226R]"
 #BSUB -R "span[hosts=1]"
-#BSUB -R "rusage[mem=3GB]"
+#BSUB -R "rusage[mem=4GB]"
 
 #BSUB -o logs/minatar_base_%J_%I.out
 #BSUB -e logs/minatar_base_%J_%I.err
@@ -27,4 +27,5 @@ python -u train_array.py \
     --setup base \
     --ablations rainbow dqn no_double no_nstep no_per no_dueling no_distrib no_noisy \
     --seeds 10 \
+    --seed-start 10 \
     --seed-procs 10

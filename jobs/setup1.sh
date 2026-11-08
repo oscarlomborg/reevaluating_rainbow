@@ -5,7 +5,7 @@
 # Maximum 10 array jobs running simultaneously
 # Each array job runs 10 seeds in parallel
 
-#BSUB -J "minatar_setup1[3,13,18]"
+#BSUB -J "minatar_setup1[23]"
 
 #BSUB -q hpc
 #BSUB -n 10

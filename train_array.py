@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--setup", required=True)
     parser.add_argument("--ablations", nargs="+", required=True)
     parser.add_argument("--seeds", type=int, default=2)
+    parser.add_argument("--seed-start", type=int, default=0)
     parser.add_argument(
         "--seed-procs",
         type=int,
@@ -124,7 +125,7 @@ def main():
             setup_name,
             ablation_name,
         )
-        for seed in range(args.seeds)
+        for seed in range(args.seed_start, args.seed_start + args.seeds)
     ]
 
     n_procs = min(args.seed_procs, args.seeds)
