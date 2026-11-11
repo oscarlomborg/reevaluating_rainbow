@@ -133,6 +133,7 @@ def make_env(env_id, env_type, seed, noop_max=0):
 
 def evaluate_policy(env, q_estimator, state_processor,
                     eval_len, epsilon=0.001, seed=None, noop_max=0, use_noise=False):
+    # epsilon=0.001 for evluation is default from Dopamine implementaion
 
     state = state_processor.process(env_reset(env, seed=seed, noop_max=noop_max))
 

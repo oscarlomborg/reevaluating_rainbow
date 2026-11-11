@@ -155,13 +155,13 @@ def convert_one(source_seed: Path, output_root: Path, game: str,
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input-root", type=Path, default=Path("runs"),
+    parser.add_argument("--input-root", type=Path, default=Path("experiments/runs"),
                         help="Root containing <env>/<ablation>/seed_<N>/logs/log_* files")
     parser.add_argument("--output-root", type=Path,
                         default=Path("experiments/minatar/dopamine"),
                         help="Directory to create <ablation>/<game>/seed_<N>/evaluation.npz")
     parser.add_argument("--steps-per-iteration", type=int, default=1_000_000,
-                        help="Runner.training_steps used in each iteration (default 1000000)")
+                        help="Runner.training_steps used in each iteration (default 1_000_000)")
     parser.add_argument("--env", nargs="+", choices=GAMES, default=None,
                         help="Optional environment filter, e.g. --env seaquest breakout")
     parser.add_argument("--ablation", nargs="+", default=None,
