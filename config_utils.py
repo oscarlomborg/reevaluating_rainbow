@@ -2,13 +2,13 @@
 
 from types import SimpleNamespace
 
-from configs import (minatar_base) # TODO add more if needed
+from configs import minatar_base, atari_base
 from configs.setups import SETUPS
 from configs.ablations import ABLATIONS
 
 BASE_CONFIGS = {
     "minatar": minatar_base,
-    # "atari": atari_base, # TODO update if needed
+    "atari": atari_base,
 }
 
 ###################################################

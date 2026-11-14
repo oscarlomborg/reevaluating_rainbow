@@ -108,6 +108,9 @@ def make_env(env_id, env_type, seed, noop_max=0):
         env = gym.make(env_id, sticky_action_prob=0.1, difficulty_ramping=True)
     else:
         # Atari preprocessing also handles Atari no-op starts.
+        import ale_py
+        gym.register_envs(ale_py)
+        
         env = gym.make(env_id, frameskip=1)
         env = gym.wrappers.AtariPreprocessing(
             env,
