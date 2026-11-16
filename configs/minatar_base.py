@@ -19,6 +19,8 @@ V_MAX = 100.0
 # Number of fully connected hidden layers after the convolution.
 HIDDEN_LAYERS = 0
 
+ZERO_PADDING = True
+
 #-v1 for minimal action space, -v0 for full action space
 ENVIRONMENTS = [
     "MinAtar/Asterix-v0",

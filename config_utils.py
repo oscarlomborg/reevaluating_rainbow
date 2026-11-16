@@ -25,7 +25,7 @@ REQUIRED_CONFIG = (
     "EPSILON_START", "EPSILON_END", "EPSILON_DECAY_STEPS",
     "EVAL_EVERY", "EVAL_LEN", "NOOP_MAX",
     "ADAM_LR", "ADAM_EPS", "V_MIN", "V_MAX", "LOSS_FUNC", "WEIGHT_INIT",
-    "HIDDEN_LAYERS", "CLIP_REWARDS", "USE_SUMMARY_WRITER"
+    "HIDDEN_LAYERS", "CLIP_REWARDS", "USE_SUMMARY_WRITER", "ZERO_PADDING"
 )
 
 def build_config(env_type, setup_name, ablation_name):
@@ -68,6 +68,8 @@ def validate_config(cfg):
         raise ValueError(f"Unknown NETWORK_TYPE: {cfg.NETWORK_TYPE}")
     if not isinstance(cfg.HIDDEN_LAYERS, int) or cfg.HIDDEN_LAYERS < 0:
         raise ValueError("HIDDEN_LAYERS must be a nonnegative integer.")
+    if not isinstance(cfg.ZERO_PADDING, bool):
+        raise ValueError("ZERO_PADDING must be a boolean.")
     if cfg.N_STEP < 1:
         raise ValueError("N_STEP must be at least 1.")
     if cfg.REPLAY_PERIOD < 1:

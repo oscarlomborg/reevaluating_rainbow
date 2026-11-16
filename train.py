@@ -83,6 +83,7 @@ def run_job(job):
             weight_init=cfg.WEIGHT_INIT,
             adam_lr=cfg.ADAM_LR,
             adam_eps=cfg.ADAM_EPS,
+            zero_padding=cfg.ZERO_PADDING,
             device=device,
         )
         q_estimator = Estimator(

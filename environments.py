@@ -110,7 +110,7 @@ def make_env(env_id, env_type, seed, noop_max=0):
         # Atari preprocessing also handles Atari no-op starts.
         import ale_py
         gym.register_envs(ale_py)
-        
+
         env = gym.make(env_id, frameskip=1)
         env = gym.wrappers.AtariPreprocessing(
             env,
@@ -142,8 +142,9 @@ def evaluate_policy(env, q_estimator, state_processor,
 
     episode_reward = episode_length = 0
     rewards, lengths = [], []
+    eval_step = 0
 
-    for _ in range(eval_len):
+    while eval_step < eval_len or episode_length > 0:
 
         # Random action: skip neural-network inference
         if epsilon > 0.0 and np.random.random() < epsilon:
@@ -162,14 +163,17 @@ def evaluate_policy(env, q_estimator, state_processor,
 
         episode_reward += reward
         episode_length += 1
+        eval_step += 1
 
         if done:
             rewards.append(episode_reward)
             lengths.append(episode_length)
 
+            episode_reward = episode_length = 0
+            if eval_step >= eval_len:
+                break
             # Do not reseed here; continue the environment RNG sequence
             state = state_processor.process(env_reset(env, noop_max=noop_max))
-            episode_reward = episode_length = 0
         else:
             state = next_state
 

@@ -4,6 +4,8 @@ ENV_TYPE = "atari"
 
 NOOP_MAX = 0
 
+ZERO_PADDING = False
+
 ENVIRONMENTS = [
     "ALE/Breakout-v5",
     "ALE/Seaquest-v5",

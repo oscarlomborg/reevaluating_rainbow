@@ -238,8 +238,8 @@ def train_model(
             if total_t >= next_eval_t:
                 result = evaluate_policy(
                     eval_env, q_estimator, state_processor,
-                    eval_len=cfg.EVAL_LEN, seed=seed + 1 if not evaluation_frames else None,
-                    noop_max=reset_noop_max, use_noise=cfg.NOISY,
+                    eval_len=cfg.EVAL_LEN, seed=seed,
+                    noop_max=reset_noop_max, use_noise=False, # use_noise=False for evaluation
                 )
                 eval_rewards, eval_lengths = result["rewards"], result["lengths"]
                 mean_return = float(np.mean(eval_rewards)) if len(eval_rewards) else np.nan

@@ -73,26 +73,37 @@ def get_linear(noisy):
     return NoisyLinear if noisy else nn.Linear
 
 class ConvFeatureExtractor(nn.Module):
-    def __init__(self, input_shape, env_type):
+    def __init__(self, input_shape, env_type, zero_padding=True):
         super().__init__()
 
         self.env_type = env_type
         channels, height, width = input_shape
 
         if env_type == "minatar":
-            self.conv1 = nn.Conv2d(channels, 16, 3, stride=1, padding=1) # TO remove padding
+            padding = 1 if zero_padding else 0
 
-            conv_h = height #- 2 To remove padding
-            conv_w = width #- 2 To remove padding
+            self.conv1 = nn.Conv2d(channels, 16, 3, stride=1, padding=padding)
+
+            conv_h = height - 2 + 2 * padding
+            conv_w = width - 2 + 2 * padding
 
             self.feature_dim = 16 * conv_h * conv_w
 
         elif env_type == "atari":
-            self.conv1 = nn.Conv2d(channels, 32, 8, stride=4)
-            self.conv2 = nn.Conv2d(32, 64, 4, stride=2)
-            self.conv3 = nn.Conv2d(64, 64, 3, stride=1)
+            padding = 1 if zero_padding else 0
 
-            self.feature_dim = 64 * 7 * 7
+            self.conv1 = nn.Conv2d(channels, 32, 8, stride=4, padding=padding)
+            self.conv2 = nn.Conv2d(32, 64, 4, stride=2, padding=padding)
+            self.conv3 = nn.Conv2d(64, 64, 3, stride=1, padding=padding)
+
+            # Calculate feature dimension automatically
+            with torch.no_grad():
+                x = torch.zeros(1, channels, height, width)
+                x = F.relu(self.conv1(x))
+                x = F.relu(self.conv2(x))
+                x = F.relu(self.conv3(x))
+
+                self.feature_dim = x.flatten(1).shape[1]
 
         else:
             raise ValueError(f"Unknown env_type: {env_type}")
@@ -119,8 +130,8 @@ class ConvFeatureExtractor(nn.Module):
 class DQN(ConvFeatureExtractor):
     """Standard DQN: convolutional features followed by one Q-value head."""
 
-    def __init__(self, input_shape, num_actions, env_type, noisy=False, hidden_layers=1):
-        super().__init__(input_shape, env_type)
+    def __init__(self, input_shape, num_actions, env_type, noisy=False, hidden_layers=1, zero_padding=True):
+        super().__init__(input_shape, env_type, zero_padding)
 
         hidden = 128 if env_type == "minatar" else 512
         Linear = get_linear(noisy)
@@ -152,8 +163,8 @@ class DQN(ConvFeatureExtractor):
 class DuelDQN(ConvFeatureExtractor):
     """Dueling DQN with separate state-value and advantage streams."""
 
-    def __init__(self, input_shape, num_actions, env_type, noisy=False, hidden_layers=1):
-        super().__init__(input_shape, env_type)
+    def __init__(self, input_shape, num_actions, env_type, noisy=False, hidden_layers=1, zero_padding=True):
+        super().__init__(input_shape, env_type, zero_padding)
 
         hidden = 128 if env_type == "minatar" else 512
         Linear = get_linear(noisy)
@@ -201,8 +212,8 @@ class DistributionalDQN(ConvFeatureExtractor):
     """C51 network: predicts a probability distribution over return atoms."""
 
     def __init__(self, input_shape, num_actions, env_type, num_atoms=51,
-                 noisy=False, v_min=-10.0, v_max=10.0, hidden_layers=1):
-        super().__init__(input_shape, env_type)
+                 noisy=False, v_min=-10.0, v_max=10.0, hidden_layers=1, zero_padding=True):
+        super().__init__(input_shape, env_type, zero_padding)
 
         self.num_actions = num_actions
         self.num_atoms = num_atoms
@@ -255,8 +266,8 @@ class DistributionalDuelDQN(ConvFeatureExtractor):
     """C51 + dueling architecture."""
 
     def __init__(self, input_shape, num_actions, env_type, num_atoms=51,
-                 noisy=False, v_min=-10.0, v_max=10.0, hidden_layers=1):
-        super().__init__(input_shape, env_type)
+                 noisy=False, v_min=-10.0, v_max=10.0, hidden_layers=1, zero_padding=True):
+        super().__init__(input_shape, env_type, zero_padding)
 
         self.num_actions = num_actions
         self.num_atoms = num_atoms
@@ -341,7 +352,7 @@ def init_weights(module, init_type="kaiming_uniform"):
 
 def build_network(input_shape, num_actions, env_type, network_type="dqn",
                   noisy=False, num_atoms=51, v_min=-10.0, v_max=10.0,
-                  hidden_layers=1, weight_init="kaiming_uniform"):
+                  hidden_layers=1, zero_padding=True, weight_init="kaiming_uniform"):
 
     nets = {
         "dqn": DQN,
@@ -354,7 +365,7 @@ def build_network(input_shape, num_actions, env_type, network_type="dqn",
         raise ValueError(f"Unknown network_type: {network_type}")
 
     kwargs = dict(input_shape=input_shape, num_actions=num_actions,
-                  env_type=env_type, noisy=noisy, hidden_layers=hidden_layers)
+                  env_type=env_type, noisy=noisy, hidden_layers=hidden_layers, zero_padding=zero_padding)
 
     if "distributional" in network_type:
         # C51 support is configured outside the network.

@@ -18,7 +18,7 @@ class Estimator:
                  network_type="dqn", loss_func="mse", noisy=False, num_atoms=51,
                  v_min=-10.0, v_max=10.0, hidden_layers=1, weight_init="kaiming_uniform",
                  scope="estimator", summaries_dir=None, device=None,
-                 adam_lr=0.00025, adam_eps=1e-6):
+                 adam_lr=0.00025, adam_eps=1e-6, zero_padding=True):
 
         self.scope = scope
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -28,7 +28,7 @@ class Estimator:
 
         self.model = build_network(
             input_shape, num_actions, env_type,
-            network_type, noisy, num_atoms, v_min, v_max, hidden_layers, weight_init
+            network_type, noisy, num_atoms, v_min, v_max, hidden_layers, zero_padding, weight_init
         ).to(self.device)
 
         # Adam hyperparameters come from the experiment config.
