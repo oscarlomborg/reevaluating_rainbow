@@ -2,7 +2,7 @@
 
 ENV_TYPE = "minatar"
 
-NOOP_MAX = 0 # TODO
+NOOP_MAX = 0
 
 DOUBLE_DQN = True
 N_STEP = 3
