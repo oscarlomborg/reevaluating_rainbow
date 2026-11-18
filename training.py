@@ -98,7 +98,7 @@ def train_model(
             next_progress += 1
 
     episode_lengths, episode_rewards = [], []
-    evaluation_frames, evaluation_returns, evaluation_mean_returns = [], [], []
+    evaluation_frames, evaluation_returns, evaluation_mean_returns, evaluation_lengths = [], [], [], []
 
     # Start every run from a fresh model.
     copier.make()
@@ -247,11 +247,13 @@ def train_model(
                 evaluation_frames.append(total_t)
                 evaluation_returns.append(eval_rewards.copy())
                 evaluation_mean_returns.append(mean_return)
+                evaluation_lengths.append(eval_lengths)
                 np.savez(
                     os.path.join(seed_dir, "evaluation.npz"),
                     frames=np.asarray(evaluation_frames, dtype=np.int64),
                     mean_returns=np.asarray(evaluation_mean_returns, dtype=np.float32),
                     raw_returns=np.asarray(evaluation_returns, dtype=object),
+                    raw_lenghts=np.asarray(evaluation_mean_returns, dtype=np.uint32),
                     seed=seed,
                     game=env_id,
                 )
