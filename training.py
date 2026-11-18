@@ -265,27 +265,27 @@ def train_model(
                     writer.flush()
 
                 # Save model after each evaluation
-                eval_checkpoint_path = os.path.join(
-                    checkpoint_dir,
-                    f"model_step_{total_t/1_000_000:g}M.pt"
-                )
+                # eval_checkpoint_path = os.path.join(
+                #     checkpoint_dir,
+                #     f"model_step_{total_t/1_000_000:g}M.pt"
+                # )
 
-                torch.save(
-                    {
-                        "q_estimator": q_estimator.model.state_dict(),
-                        "target_estimator": target_estimator.model.state_dict(),
-                        "optimizer": q_estimator.optimizer.state_dict(),
-                        "global_step": q_estimator.global_step,
-                        "total_t": total_t,
-                        "episode": i_episode,
-                    },
-                    eval_checkpoint_path,
-                )
+                # torch.save(
+                #     {
+                #         "q_estimator": q_estimator.model.state_dict(),
+                #         "target_estimator": target_estimator.model.state_dict(),
+                #         "optimizer": q_estimator.optimizer.state_dict(),
+                #         "global_step": q_estimator.global_step,
+                #         "total_t": total_t,
+                #         "episode": i_episode,
+                #     },
+                #     eval_checkpoint_path,
+                # )
 
-                print(
-                    f"[CHECKPOINT] Saved model at step {total_t:,}",
-                    flush=True,
-                )
+                # print(
+                #     f"[CHECKPOINT] Saved model at step {total_t:,}",
+                #     flush=True,
+                # )
 
                 next_eval_t = ((total_t // cfg.EVAL_EVERY) + 1) * cfg.EVAL_EVERY
 
